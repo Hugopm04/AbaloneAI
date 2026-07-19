@@ -1,0 +1,85 @@
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "abalone/agent.hpp"
+#include "abalone/board.hpp"
+#include "abalone/move.hpp"
+
+namespace abalone {
+
+inline constexpr int kMarblesToLose = 6;
+
+enum class Result {
+    kOngoing,
+    kBlackWins,
+    kWhiteWins,
+    kDraw,  // only reachable when a move limit is set
+};
+
+const char* result_name(Result r);
+
+struct GameConfig {
+    Opening opening = Opening::kClassic;
+
+    // Optional cap on game length, in plies. Unset means the game runs until
+    // somebody loses six marbles, however long that takes.
+    std::optional<int> move_limit;
+
+    // Optional per-move thinking time. Unset means agents think as long as
+    // they like -- useful when debugging, unwise in a tournament.
+    std::optional<std::chrono::milliseconds> time_per_move;
+};
+
+// What one agent turn cost, recorded for every ply.
+struct MoveReport {
+    Move move{};
+    std::chrono::milliseconds elapsed{0};
+    std::uint64_t nodes = 0;
+    std::uint64_t evals = 0;
+
+    // The agent was still searching when the clock expired. Its last submitted
+    // move was played. Not an error -- this is the expected shape of a
+    // time-limited search.
+    bool timed_out = false;
+
+    // The agent submitted nothing before the deadline, so the engine played a
+    // fallback move on its behalf. Always a bug in the agent.
+    bool forfeited = false;
+};
+
+class Game {
+public:
+    explicit Game(GameConfig config);
+
+    const Board& board() const { return board_; }
+    Player to_move() const { return to_move_; }
+    int ply() const { return ply_; }
+    const GameConfig& config() const { return config_; }
+    const std::vector<MoveReport>& history() const { return history_; }
+
+    Result result() const;
+    bool over() const { return result() != Result::kOngoing; }
+
+    std::vector<Move> legal_moves() const;
+
+    // Plays `move` and advances the turn.
+    void play(const Move& move, const MoveReport& report);
+
+    // Runs one agent turn under the configured time limit and plays the
+    // result. The limit is enforced by the engine; an agent cannot exceed it.
+    MoveReport play_agent_turn(const std::shared_ptr<Agent>& agent);
+
+private:
+    GameConfig config_;
+    Board board_;
+    Player to_move_ = Player::kBlack;
+    int ply_ = 0;
+    std::vector<MoveReport> history_;
+};
+
+}  // namespace abalone
