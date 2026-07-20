@@ -113,7 +113,13 @@ see directly whether a pruning change earned its keep.
 
 ## Status
 
-The engine, agent API, terminal UI, arena and rule tests are all written. **They have not yet
-been compiled or run** — this machine has no working C++ toolchain (see
-[docs/toolchain_setup.md](docs/toolchain_setup.md)). Expect to fix compile errors on the first
-build; the test suite in `tests/test_rules.cpp` is the fastest way to confirm the rules are right.
+**Builds, tests pass, and plays.** First successful build was with g++ 16.1.0 (MSYS2 UCRT64)
+and the Ninja generator — see [docs/toolchain_setup.md](docs/toolchain_setup.md). The engine
+compiled clean with no source changes; the rule suite in `tests/test_rules.cpp` passes, and a
+20-game random-vs-random arena ran to completion with no forfeits.
+
+Use the Ninja generator, not the default Visual Studio one:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+```
