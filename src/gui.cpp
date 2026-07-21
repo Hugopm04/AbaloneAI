@@ -124,6 +124,7 @@ struct Target {
 struct App {
     GameConfig config;
     Screen screen = Screen::kMenu;
+    bool quit = false;  // set by the Quit button; the window is closed once, by run_gui
 
     // Setup choices.
     bool human_black = true;
@@ -415,7 +416,9 @@ void screen_menu(App& app) {
     y += 66;
     if (button(Rectangle{x, y, w, 52}, "Settings")) app.screen = Screen::kSettings;
     y += 66;
-    if (button(Rectangle{x, y, w, 52}, "Quit")) app.screen = Screen::kMenu, CloseWindow();
+    // Never call CloseWindow() here: the rest of this frame, and the top of the
+    // next loop iteration, would still be talking to a destroyed window.
+    if (button(Rectangle{x, y, w, 52}, "Quit")) app.quit = true;
 
     if (!have_agents) {
         centered("No agents registered -- AI modes unavailable.", 18, cx,
@@ -517,6 +520,10 @@ void screen_play(App& app) {
 }  // namespace
 
 int run_gui(GameConfig config) {
+    // raylib logs every shader, texture and buffer it loads at INFO level, which
+    // buries anything that actually matters. Keep warnings and errors.
+    SetTraceLogLevel(LOG_WARNING);
+
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
     InitWindow(1120, 780, "Abalone");
     SetWindowMinSize(900, 640);
@@ -526,7 +533,7 @@ int run_gui(GameConfig config) {
     App app;
     app.config = config;
 
-    while (!WindowShouldClose()) {
+    while (!WindowShouldClose() && !app.quit) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (app.screen == Screen::kMenu) break;
             app.screen = Screen::kMenu;
