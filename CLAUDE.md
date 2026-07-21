@@ -45,8 +45,9 @@ above and below the middle row. `kDirOffsets[i]` and `kDirOffsets[i+3]` are oppo
 
 ## Status
 
-**Compiles successfully.** The toolchain on this machine works (see
-`docs/toolchain_setup.md`); build and run the tests as usual when changing the engine.
+**Builds, tests pass, and plays.** Built with g++ 16.1.0 (MSYS2 UCRT64) and the **Ninja**
+generator — not the default Visual Studio one (see `docs/toolchain_setup.md`). No source
+changes were needed. Run `ctest --test-dir build --output-on-failure` after engine changes.
 
 ## Agent helpers
 

@@ -142,6 +142,130 @@ void choose_move(const Position& pos, SearchContext& ctx) override {
 Note the ordering: check the deadline *before* submitting, so a half-finished depth never
 overwrites a good result from a complete one.
 
+### Where the counters go
+
+Count inside the search, not in the deepening loop — and **do not reset between
+iterations**. `ctx` accumulates across the whole turn, so the number the arena reports is
+the total work the turn cost, which is what you want when comparing two agents.
+
+```cpp
+int search(const Position& pos, const Board& board, Player p, int depth, SearchContext& ctx) {
+    if (depth == 0 || game_over(board)) {
+        ctx.count_eval();               // leaf: heuristic actually ran
+        return evaluate(board, p);
+    }
+
+    auto moves = generate_moves(board, p);
+    ctx.count_node(moves.size());       // positions this node put in front of us
+
+    int best = kMinScore;
+    for (const Move& m : moves) {
+        if (ctx.deadline_passed()) break;
+        Board next = board;
+        apply_move(&next, p, m);
+        best = std::max(best, -search(pos, next, other(p), depth - 1, ctx));
+        if (best >= beta) break;        // cutoff: the rest are never counted as evals
+    }
+    return best;
+}
+```
+
+Two things follow from this that surprise people:
+
+- **Re-searching the same node at every depth is counted every time, and that is correct.**
+  Iterative deepening genuinely does revisit depth 1 on each pass. The re-search is real
+  work, so it belongs in the total. Trying to deduplicate makes your numbers incomparable
+  with everyone else's.
+- **Only the leaf calls `count_eval()`.** Put it where `evaluate()` is called and nowhere
+  else. If you also count it at interior nodes, `nodes ≈ evals` forever and the ratio stops
+  telling you anything about pruning.
+
+Counting `moves.size()` once per node, rather than `count_node()` per child inside the
+loop, means a node whose children are all pruned still reports the moves it generated — the
+cost you actually paid. Either convention is defensible; just pick one and keep it, since
+the ratio is only meaningful compared against your own earlier runs.
+
+## Breadth-first search
+
+Worth saying plainly first: **for game playing, iterative deepening is the breadth-first
+approach you actually want.** It visits the tree in the same depth-by-depth order, but keeps
+only one path in memory instead of a whole frontier, and it can stop at any moment with a
+usable answer. A literal BFS over a branching factor that runs to hundreds of moves per
+position will exhaust memory a couple of plies in.
+
+It is still useful when you want to reason about the frontier itself — say, scoring every
+position reachable in exactly N plies, or collecting statistics about the opening tree. The
+shape is a queue of (board, side to move, the root move that led here):
+
+```cpp
+#include <deque>
+
+struct Node {
+    abalone::Board board;
+    abalone::Player to_move;
+    std::size_t root_index;   // which of pos.legal this subtree came from
+    int depth;
+};
+
+void choose_move(const abalone::Position& pos, abalone::SearchContext& ctx) override {
+    ctx.submit(pos.legal.front());          // rule 1: always publish first
+
+    constexpr int kMaxDepth = 2;
+    std::vector<int> best_for_root(pos.legal.size(), kMinScore);
+
+    std::deque<Node> frontier;
+    for (std::size_t i = 0; i < pos.legal.size(); ++i) {
+        abalone::Board next = pos.board;
+        abalone::apply_move(&next, pos.to_move, pos.legal[i]);
+        frontier.push_back({next, abalone::other(pos.to_move), i, 1});
+    }
+    ctx.count_node(pos.legal.size());
+
+    while (!frontier.empty()) {
+        if (ctx.deadline_passed()) return;  // frontier is ours; just walk away
+
+        const Node node = frontier.front();
+        frontier.pop_front();
+
+        if (node.depth == kMaxDepth) {
+            ctx.count_eval();
+            const int score = evaluate(node.board, pos.to_move);
+            best_for_root[node.root_index] =
+                std::max(best_for_root[node.root_index], score);
+            continue;
+        }
+
+        auto replies = abalone::generate_moves(node.board, node.to_move);
+        ctx.count_node(replies.size());
+        for (const abalone::Move& r : replies) {
+            abalone::Board next = node.board;
+            abalone::apply_move(&next, node.to_move, r);
+            frontier.push_back({next, abalone::other(node.to_move),
+                                node.root_index, node.depth + 1});
+        }
+    }
+
+    const auto it = std::max_element(best_for_root.begin(), best_for_root.end());
+    ctx.submit(pos.legal[std::distance(best_for_root.begin(), it)]);
+}
+```
+
+Points to note:
+
+- `root_index` is what makes the result usable. BFS loses the path, so each node has to
+  carry which root move it descended from or you cannot turn a leaf score into a decision.
+- The **submit only happens at the end**, once the whole frontier is drained. That is the
+  weakness compared with iterative deepening: cut the search off early and everything past
+  the opening `submit()` is wasted. Never submit from a partially explored frontier — a
+  score built from some of the replies but not others is not comparable across roots.
+- Returning early on `deadline_passed()` is safe here because `frontier` and
+  `best_for_root` are locals. Keep it that way; see rule 2 above.
+- `evaluate()` takes `pos.to_move` as the perspective, not `node.to_move`. Every score has
+  to be from the root player's point of view or the maximum at the end is meaningless.
+- Each level multiplies the frontier by the branching factor, which in Abalone is often
+  60–100. Depth 3 is already millions of boards. Bound it, and treat this as a tool for
+  analysis rather than the engine of a competitive bot.
+
 ## Instrumentation
 
 ```cpp

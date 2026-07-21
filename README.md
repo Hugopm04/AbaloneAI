@@ -126,6 +126,11 @@ REGISTER_AGENT(MyAgent);
 
 Add the file to `AGENT_SOURCES` in `CMakeLists.txt` and it appears in the menu automatically.
 
+Your evaluator does not have to recompute what the engine already tracks — `pos.own_marbles()`,
+`pos.enemy_marbles()`, `pos.own_losses()` and `pos.enemy_losses()` are all O(1). The full list
+of available helpers, with their costs, is the **Helper functions** section of
+[docs/writing_agents.md](docs/writing_agents.md).
+
 ## Time limits are enforced, not requested
 
 `choose_move()` runs on a worker thread. When the configured time per move runs out, the

@@ -12,8 +12,12 @@
 // It then shows up in the main menu and in the arena with no further wiring.
 
 #include "abalone/agent.hpp"
+#include <limits>
 
 namespace {
+
+const float pos_infinite = std::numeric_limits<float>::max();
+const float neg_infinite = std::numeric_limits<float>::min();
 
 class RandomAgent : public abalone::Agent {
 public:
@@ -32,8 +36,7 @@ public:
         // Submit something immediately. If your search is ever cut off before
         // it submits, the engine has to play a fallback move for you and flags
         // the turn as forfeited -- so always publish a legal move up front.
-        const abalone::Move& choice = pos.legal[0];
-        ctx.submit(choice);
+        ctx.submit(pos.legal.front());
 
         // Statistics. A real search separates these two: count_node() for every
         // position you touch, count_eval() only where you run your heuristic.
@@ -44,16 +47,37 @@ public:
         // A searching agent would loop here, deepening and re-submitting, and
         // bail out when ctx.deadline_passed() turns true. Random has nothing
         // to think about, so it just returns.
+
+        for (int depth = 1; depth < 64; ++depth) {
+            std::optional<Move> best = search(pos, depth, ctx);
+            if (ctx.deadline_passed()) break;   // depth incomplete, discard it
+            if (best) ctx.submit(*best);        // only submit completed depths
+        }
     }
 
 private:
+
+    std::optional<Move> search(const abalone::Position& pos, )
+
     float evaluate_pos(const abalone::Position& pos) const {
-        int own_losses = pos.
+        int own_losses = pos.own_losses();
+        if (own_losses == 6){
+            return neg_infinite;
+        }
+
+        int enemy_losses = pos.enemy_losses();
+        if (enemy_losses == 6){
+            return pos_infinite;
+        }
         
+        float puntuation = 0;
+
         int own_marbles = pos.own_marbles();
         int enemy_marbles = pos.enemy_marbles();
 
-
+        puntuation = own_marbles - enemy_marbles;
+        
+        return puntuation;
     }
 };
 
