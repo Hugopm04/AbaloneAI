@@ -110,7 +110,20 @@ Cell Board::at(Coord c) const {
 
 void Board::set(Coord c, Cell value) {
     if (!on_board(c)) return;
-    grid_[c.row * kCols + c.col] = value;
+
+    // Keep the per-player counts in step with the grid. set() is the only way
+    // a cell ever changes, so maintaining them here makes marbles() O(1) and
+    // impossible to leave stale.
+    Cell& slot = grid_[c.row * kCols + c.col];
+    if (slot == value) return;
+
+    if (slot == Cell::kBlack) --black_marbles_;
+    else if (slot == Cell::kWhite) --white_marbles_;
+
+    if (value == Cell::kBlack) ++black_marbles_;
+    else if (value == Cell::kWhite) ++white_marbles_;
+
+    slot = value;
 }
 
 int Board::losses(Player p) const {
@@ -126,12 +139,7 @@ void Board::add_loss(Player p) {
 }
 
 int Board::marbles(Player p) const {
-    const Cell want = to_cell(p);
-    int count = 0;
-    for (const Coord& c : cells()) {
-        if (at(c) == want) ++count;
-    }
-    return count;
+    return p == Player::kBlack ? black_marbles_ : white_marbles_;
 }
 
 Board Board::from_opening(Opening opening) {

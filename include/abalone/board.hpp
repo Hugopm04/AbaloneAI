@@ -135,7 +135,7 @@ public:
     int losses(Player p) const;
     void add_loss(Player p);
 
-    // Marbles still on the board.
+    // Marbles still on the board. O(1) -- maintained incrementally by set().
     int marbles(Player p) const;
 
     // All 61 playable coordinates, in a stable order.
@@ -145,6 +145,8 @@ private:
     std::array<Cell, kRows * kCols> grid_{};
     int black_losses_ = 0;
     int white_losses_ = 0;
+    int black_marbles_ = 0;
+    int white_marbles_ = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -153,12 +155,11 @@ private:
 //
 // These take the board and the player explicitly, so they answer about the
 // position you hand them -- which inside a search is the node you are on, not
-// the root. Both are O(1): the board already counts marbles pushed off, so
-// there is nothing to scan. Prefer marbles_left() over Board::marbles(), which
-// walks all 61 cells.
+// the root. All are O(1).
 
+// Marbles `p` still has on the board.
 inline int marbles_left(const Board& board, Player p) {
-    return kMarblesPerPlayer - board.losses(p);
+    return board.marbles(p);
 }
 
 // True once `p` has lost 6 marbles, i.e. `p` has lost the game.

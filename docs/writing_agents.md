@@ -49,8 +49,8 @@ search loop unless it is marked otherwise.
 | `is_eliminated(board, p)` | True once `p` has lost 6 marbles | O(1) |
 | `game_over(board)` | True when either side has been eliminated | O(1) |
 
-These are derived from the push-off counters the board maintains
-(`kMarblesPerPlayer - board.losses(p)`), not by scanning cells. A material term is then:
+Nothing here scans the board — `Board` keeps the counts up to date as marbles move. A
+material term is then:
 
 ```cpp
 const int material = marbles_left(board, p) - marbles_left(board, other(p));
@@ -89,12 +89,12 @@ and it is why the helpers do not do it for you.
 | --- | --- | --- |
 | `board.at(coord)` | `Cell::kEmpty` / `kBlack` / `kWhite` / `kOffBoard` | O(1) |
 | `board.losses(p)` | Marbles of `p` pushed off, for either player; 6 means `p` has lost | O(1) |
-| `board.marbles(p)` | Marbles of `p` on the board | **O(61)** — scans every cell |
+| `board.marbles(p)` | Marbles of `p` on the board | O(1) — counter kept up to date by `set()` |
 | `Board::cells()` | The 61 playable coordinates, stable order | O(1) to obtain |
 
-`board.marbles(p)` and `kMarblesPerPlayer - board.losses(p)` give the same answer; prefer
-the second one in hot code. Use `Board::cells()` when you genuinely need to walk the whole
-board, e.g. a centre-of-mass or cohesion term.
+`marbles_left(board, p)` is just `board.marbles(p)`; use either. `Board` keeps a running
+count per player, updated in `set()`, so neither one scans. Use `Board::cells()` only when
+you genuinely need to walk the whole board, e.g. a centre-of-mass or cohesion term.
 
 ### Geometry (`board.hpp`)
 

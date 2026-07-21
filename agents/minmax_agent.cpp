@@ -78,20 +78,20 @@ private:
     }
 
     float evaluate(const Board& board, const abalone::Position& pos) const {
-        int own_losses = pos.own_losses();
+        int own_losses = board.losses(p);
         if (own_losses == 6){
             return NEG_INFINITE;
         }
 
-        int enemy_losses = pos.enemy_losses();
+        int enemy_losses = board.losses(abalone::other);
         if (enemy_losses == 6){
             return POS_INFINITE;
         }
         
         float puntuation = 0;
 
-        int own_marbles = pos.own_marbles();
-        int enemy_marbles = pos.enemy_marbles();
+        int own_marbles = board.marbles(p);
+        int enemy_marbles = board.marbles(abalone::other);
 
         puntuation = own_marbles - enemy_marbles;
         
