@@ -16,10 +16,10 @@
 
 namespace {
 
-const float pos_infinite = std::numeric_limits<float>::max();
-const float neg_infinite = std::numeric_limits<float>::min();
+const float POS_INFINITE = std::numeric_limits<float>::max();
+const float NEG_INFINITE = -POS_INFINITE;
 
-class RandomAgent : public abalone::Agent {
+class MinMaxAgent : public abalone::Agent {
 public:
     std::string name() const override { return "minmax"; }
 
@@ -48,7 +48,7 @@ public:
         // bail out when ctx.deadline_passed() turns true. Random has nothing
         // to think about, so it just returns.
 
-        for (int depth = 1; depth < 64; ++depth) {
+        for (int depth = 1; depth < MAX_DEPTH; ++depth) {
             std::optional<Move> best = search(pos, depth, ctx);
             if (ctx.deadline_passed()) break;   // depth incomplete, discard it
             if (best) ctx.submit(*best);        // only submit completed depths
@@ -56,18 +56,39 @@ public:
     }
 
 private:
+    const int MAX_DEPTH = 5;
 
-    std::optional<Move> search(const abalone::Position& pos, )
+    int search(const Position& pos, Player p, int depth, SearchContext& ctx) {
+        const Board board = pos.board;
+        if (depth == 0 || game_over(board)) {
+            ctx.count_eval();               // leaf: heuristic actually ran
+            return evaluate(board, p);
+        }
 
-    float evaluate_pos(const abalone::Position& pos) const {
+        auto moves = generate_moves(board, p);
+        ctx.count_node(moves.size());       // positions this node put in front of us
+
+        int best = kMinScore;
+        for (const Move& m : moves) {
+            if (ctx.deadline_passed()) break;
+            Board next = board;
+            apply_move(&next, p, m);
+            best = std::max(best, -search(pos, next, other(p), depth - 1, ctx));
+            if (best >= beta) break;        // cutoff: the rest are never counted as evals
+        }
+
+        return best;
+    }
+
+    float evaluate(const Board& board, const abalone::Position& pos) const {
         int own_losses = pos.own_losses();
         if (own_losses == 6){
-            return neg_infinite;
+            return NEG_INFINITE;
         }
 
         int enemy_losses = pos.enemy_losses();
         if (enemy_losses == 6){
-            return pos_infinite;
+            return POS_INFINITE;
         }
         
         float puntuation = 0;

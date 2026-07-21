@@ -51,8 +51,18 @@ changes were needed. Run `ctest --test-dir build --output-on-failure` after engi
 
 ## Agent helpers
 
-Shared conveniences for user-written AIs live on `Position` (in `agent.hpp`) and are
-documented under "Helper functions" in `docs/writing_agents.md`. Keep that section in sync
-whenever a helper is added — it is the reference the user writes bots against. Helpers must
-stay cheap enough to call inside a search loop; prefer values the engine already tracks
-(e.g. `kMarblesPerPlayer - board.losses(p)`) over rescanning the 61 cells.
+Shared conveniences for user-written AIs are free functions in `board.hpp`
+(`marbles_left`, `is_eliminated`, `game_over`), documented under "Helper functions" in
+`docs/writing_agents.md`. Keep that section in sync whenever a helper is added — it is the
+reference the user writes bots against.
+
+Two constraints on any helper added here:
+
+- **Take `(board, player)` explicitly; never hang it off `Position`.** An earlier version
+  put `own_marbles()`/`enemy_marbles()` on `Position`, which read the *root* board and
+  `to_move`. Called from inside a search they returned the same value at every leaf, making
+  the evaluator a constant without any visible error. Removed for that reason — do not
+  reintroduce that shape.
+- **Cheap enough for a search loop.** Prefer counters the engine already maintains
+  (`kMarblesPerPlayer - board.losses(p)`) over rescanning the 61 cells; `Board::marbles()`
+  is the O(61) version and exists only for non-hot code.

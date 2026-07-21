@@ -41,26 +41,26 @@ Things the engine already tracks, so your evaluator does not have to recompute t
 section grows as helpers are added; anything listed here is safe to call from inside a
 search loop unless it is marked otherwise.
 
-### On `Position`
+### Position queries
 
 | Call | Returns | Cost |
 | --- | --- | --- |
-| `pos.own_marbles()` | Marbles `pos.to_move` still has on the board | O(1) |
-| `pos.enemy_marbles()` | Marbles the opponent still has on the board | O(1) |
-| `pos.own_losses()` | Marbles of `pos.to_move` pushed off; 6 means you lost | O(1) |
-| `pos.enemy_losses()` | Marbles of the opponent pushed off; 6 means you won | O(1) |
+| `marbles_left(board, p)` | Marbles `p` still has on the board | O(1) |
+| `is_eliminated(board, p)` | True once `p` has lost 6 marbles | O(1) |
+| `game_over(board)` | True when either side has been eliminated | O(1) |
 
-Both are derived from the push-off counters the board maintains
-(`kMarblesPerPlayer - board.losses(...)`), not by scanning cells. A material term is then
-just:
+These are derived from the push-off counters the board maintains
+(`kMarblesPerPlayer - board.losses(p)`), not by scanning cells. A material term is then:
 
 ```cpp
-const int material = pos.own_marbles() - pos.enemy_marbles();
+const int material = marbles_left(board, p) - marbles_left(board, other(p));
 ```
 
-Note these read `pos.to_move`, i.e. the *root* side. Inside a search you are looking at
-boards for both colours, so at internal nodes use the `Board` calls below with an explicit
-player and negate for the side to move as usual.
+**They take the board and the player explicitly, and that is deliberate.** Inside a search
+you are looking at a board that is not `pos.board` and, half the time, a player that is not
+`pos.to_move`. An evaluator should be a pure function of `(board, player)` — if it reaches
+for `pos` instead, it returns the same score at every leaf and the search silently stops
+meaning anything. Pass the node down; do not close over the root.
 
 ### On `Board`
 
@@ -148,27 +148,38 @@ Count inside the search, not in the deepening loop — and **do not reset betwee
 iterations**. `ctx` accumulates across the whole turn, so the number the arena reports is
 the total work the turn cost, which is what you want when comparing two agents.
 
+Here is a plain minimax — no pruning, nothing clever — with the counters in place. It is
+written in the negamax form, where one function serves both sides by negating the child's
+score, so `evaluate()` must return its score **from the point of view of `p`**:
+
 ```cpp
-int search(const Position& pos, const Board& board, Player p, int depth, SearchContext& ctx) {
-    if (depth == 0 || game_over(board)) {
-        ctx.count_eval();               // leaf: heuristic actually ran
+float search(const abalone::Board& board, abalone::Player p, int depth,
+             abalone::SearchContext& ctx) {
+    if (depth == 0 || abalone::game_over(board)) {
+        ctx.count_eval();               // leaf: the heuristic actually ran
         return evaluate(board, p);
     }
 
-    auto moves = generate_moves(board, p);
+    auto moves = abalone::generate_moves(board, p);
     ctx.count_node(moves.size());       // positions this node put in front of us
 
-    int best = kMinScore;
-    for (const Move& m : moves) {
+    float best = -std::numeric_limits<float>::max();
+    for (const abalone::Move& m : moves) {
         if (ctx.deadline_passed()) break;
-        Board next = board;
-        apply_move(&next, p, m);
-        best = std::max(best, -search(pos, next, other(p), depth - 1, ctx));
-        if (best >= beta) break;        // cutoff: the rest are never counted as evals
+        abalone::Board next = board;
+        abalone::apply_move(&next, p, m);
+        best = std::max(best, -search(next, abalone::other(p), depth - 1, ctx));
     }
     return best;
 }
 ```
+
+Use `-std::numeric_limits<float>::max()` (or `::lowest()`) for "worse than anything". For
+floating-point types `::min()` is the smallest *positive* value, roughly `1.2e-38`, so a
+lost game would score as slightly good and the search would walk straight into it.
+
+With no pruning, `nodes` and `evals` stay in lockstep — that is the baseline the ratio is
+measured against once you add cutoffs.
 
 Two things follow from this that surprise people:
 
@@ -177,8 +188,8 @@ Two things follow from this that surprise people:
   work, so it belongs in the total. Trying to deduplicate makes your numbers incomparable
   with everyone else's.
 - **Only the leaf calls `count_eval()`.** Put it where `evaluate()` is called and nowhere
-  else. If you also count it at interior nodes, `nodes ≈ evals` forever and the ratio stops
-  telling you anything about pruning.
+  else. If you also count it at interior nodes, the ratio stops telling you anything about
+  pruning once you add it.
 
 Counting `moves.size()` once per node, rather than `count_node()` per child inside the
 loop, means a node whose children are all pruned still reports the moves it generated — the

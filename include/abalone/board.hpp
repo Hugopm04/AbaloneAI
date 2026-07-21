@@ -147,4 +147,27 @@ private:
     int white_losses_ = 0;
 };
 
+// ---------------------------------------------------------------------------
+// Cheap queries for agents
+// ---------------------------------------------------------------------------
+//
+// These take the board and the player explicitly, so they answer about the
+// position you hand them -- which inside a search is the node you are on, not
+// the root. Both are O(1): the board already counts marbles pushed off, so
+// there is nothing to scan. Prefer marbles_left() over Board::marbles(), which
+// walks all 61 cells.
+
+inline int marbles_left(const Board& board, Player p) {
+    return kMarblesPerPlayer - board.losses(p);
+}
+
+// True once `p` has lost 6 marbles, i.e. `p` has lost the game.
+inline bool is_eliminated(const Board& board, Player p) {
+    return board.losses(p) >= 6;
+}
+
+inline bool game_over(const Board& board) {
+    return is_eliminated(board, Player::kBlack) || is_eliminated(board, Player::kWhite);
+}
+
 }  // namespace abalone
