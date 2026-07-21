@@ -92,8 +92,12 @@ struct Position {
     // Marbles still on the board, from the perspective of the side to move.
     // O(1): the board already tracks marbles pushed off, so these are just
     // the starting count minus that -- no scanning of the 61 cells.
-    int own_marbles() const { return kMarblesPerPlayer - board.losses(to_move); }
-    int enemy_marbles() const { return kMarblesPerPlayer - board.losses(other(to_move)); }
+    int own_marbles() const { return kMarblesPerPlayer - own_losses(); }
+    int enemy_marbles() const { return kMarblesPerPlayer - enemy_losses(); }
+
+    // Marbles pushed off the edge. 6 loses the game.
+    int own_losses() const { return board.losses(to_move); }
+    int enemy_losses() const { return board.losses(other(to_move)); }
 };
 
 class Agent {

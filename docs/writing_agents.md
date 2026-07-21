@@ -47,6 +47,8 @@ search loop unless it is marked otherwise.
 | --- | --- | --- |
 | `pos.own_marbles()` | Marbles `pos.to_move` still has on the board | O(1) |
 | `pos.enemy_marbles()` | Marbles the opponent still has on the board | O(1) |
+| `pos.own_losses()` | Marbles of `pos.to_move` pushed off; 6 means you lost | O(1) |
+| `pos.enemy_losses()` | Marbles of the opponent pushed off; 6 means you won | O(1) |
 
 Both are derived from the push-off counters the board maintains
 (`kMarblesPerPlayer - board.losses(...)`), not by scanning cells. A material term is then

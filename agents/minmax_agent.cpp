@@ -48,7 +48,12 @@ public:
 
 private:
     float evaluate_pos(const abalone::Position& pos) const {
-        int own_marbles = 
+        int own_losses = pos.
+        
+        int own_marbles = pos.own_marbles();
+        int enemy_marbles = pos.enemy_marbles();
+
+
     }
 };
 
