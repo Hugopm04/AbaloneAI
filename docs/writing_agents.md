@@ -62,12 +62,33 @@ you are looking at a board that is not `pos.board` and, half the time, a player 
 for `pos` instead, it returns the same score at every leaf and the search silently stops
 meaning anything. Pass the node down; do not close over the root.
 
+At the root — in `choose_move()`, before any search — you build the pair yourself from
+`pos`, which is the one place where doing so is correct:
+
+```cpp
+const abalone::Board& board = pos.board;
+const abalone::Player me    = pos.to_move;
+const abalone::Player enemy = abalone::other(me);
+
+const int my_marbles    = marbles_left(board, me);
+const int enemy_marbles = marbles_left(board, enemy);
+const int my_losses     = board.losses(me);       // marbles I have had pushed off
+const int enemy_losses  = board.losses(enemy);    // marbles I have pushed off
+```
+
+`board.losses(p)` is the losses counterpart of `marbles_left(board, p)` — the two always sum
+to `kMarblesPerPlayer`, so use whichever reads better in your heuristic. Both take any
+player, so there is no separate "own" and "enemy" call to look for; `other(p)` supplies the
+opposing side. Inside the search, the same four lines work with the node's `board` and `p`
+substituted for `pos.board` and `pos.to_move` — that substitution is the whole difference,
+and it is why the helpers do not do it for you.
+
 ### On `Board`
 
 | Call | Returns | Cost |
 | --- | --- | --- |
 | `board.at(coord)` | `Cell::kEmpty` / `kBlack` / `kWhite` / `kOffBoard` | O(1) |
-| `board.losses(p)` | Marbles of `p` pushed off; 6 means `p` has lost | O(1) |
+| `board.losses(p)` | Marbles of `p` pushed off, for either player; 6 means `p` has lost | O(1) |
 | `board.marbles(p)` | Marbles of `p` on the board | **O(61)** — scans every cell |
 | `Board::cells()` | The 61 playable coordinates, stable order | O(1) to obtain |
 

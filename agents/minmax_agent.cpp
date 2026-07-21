@@ -58,25 +58,22 @@ public:
 private:
     const int MAX_DEPTH = 5;
 
-    int search(const Position& pos, Player p, int depth, SearchContext& ctx) {
-        const Board board = pos.board;
-        if (depth == 0 || game_over(board)) {
-            ctx.count_eval();               // leaf: heuristic actually ran
+    float search(const abalone::Board& board, abalone::Player p, int depth, abalone::SearchContext& ctx) {
+        if (depth == 0 || abalone::game_over(board)) {
+            ctx.count_eval();               // leaf: the heuristic actually ran
             return evaluate(board, p);
         }
 
-        auto moves = generate_moves(board, p);
+        auto moves = abalone::generate_moves(board, p);
         ctx.count_node(moves.size());       // positions this node put in front of us
 
-        int best = kMinScore;
-        for (const Move& m : moves) {
+        float best = NEG_INFINITE;
+        for (const abalone::Move& m : moves) {
             if (ctx.deadline_passed()) break;
-            Board next = board;
-            apply_move(&next, p, m);
-            best = std::max(best, -search(pos, next, other(p), depth - 1, ctx));
-            if (best >= beta) break;        // cutoff: the rest are never counted as evals
+            abalone::Board next = board;
+            abalone::apply_move(&next, p, m);
+            best = std::max(best, -search(next, abalone::other(p), depth - 1, ctx));
         }
-
         return best;
     }
 
