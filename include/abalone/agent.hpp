@@ -88,6 +88,12 @@ struct Position {
     Player to_move;
     int move_number = 0;                  // plies played so far
     const std::vector<Move>& legal;       // pre-generated, never empty
+
+    // Marbles still on the board, from the perspective of the side to move.
+    // O(1): the board already tracks marbles pushed off, so these are just
+    // the starting count minus that -- no scanning of the 61 cells.
+    int own_marbles() const { return kMarblesPerPlayer - board.losses(to_move); }
+    int enemy_marbles() const { return kMarblesPerPlayer - board.losses(other(to_move)); }
 };
 
 class Agent {

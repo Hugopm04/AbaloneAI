@@ -11,8 +11,6 @@
 //
 // It then shows up in the main menu and in the arena with no further wiring.
 
-#include <random>
-
 #include "abalone/agent.hpp"
 
 namespace {
@@ -22,20 +20,19 @@ public:
     std::string name() const override { return "minmax"; }
 
     std::string description() const override {
-        return "Picks a uniformly random legal move. The baseline every other agent should beat.";
+        return "Basic MinMax Algorithm";
     }
 
     // Called once per game. Reseed here so repeated games are not identical.
     void on_game_start(abalone::Player /*seat*/) override {
-        rng_.seed(std::random_device{}());
+        
     }
 
     void choose_move(const abalone::Position& pos, abalone::SearchContext& ctx) override {
         // Submit something immediately. If your search is ever cut off before
         // it submits, the engine has to play a fallback move for you and flags
         // the turn as forfeited -- so always publish a legal move up front.
-        std::uniform_int_distribution<std::size_t> pick(0, pos.legal.size() - 1);
-        const abalone::Move& choice = pos.legal[pick(rng_)];
+        const abalone::Move& choice = pos.legal[0];
         ctx.submit(choice);
 
         // Statistics. A real search separates these two: count_node() for every
@@ -50,7 +47,9 @@ public:
     }
 
 private:
-    std::mt19937 rng_{std::random_device{}()};
+    float evaluate_pos(const abalone::Position& pos) const {
+        int own_marbles = 
+    }
 };
 
 }  // namespace

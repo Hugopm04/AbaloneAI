@@ -28,6 +28,9 @@ inline constexpr int kRows = 9;
 inline constexpr int kCols = 9;
 inline constexpr int kCells = 61;
 
+// Marbles each side starts with; every opening uses the same count.
+inline constexpr int kMarblesPerPlayer = 14;
+
 struct Coord {
     int row = -1;
     int col = -1;

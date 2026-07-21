@@ -35,6 +35,72 @@ auto replies = abalone::generate_moves(next, abalone::other(pos.to_move));
 
 `Board` is a plain value type — copying it is cheap and there is no undo to get wrong.
 
+## Helper functions
+
+Things the engine already tracks, so your evaluator does not have to recompute them. This
+section grows as helpers are added; anything listed here is safe to call from inside a
+search loop unless it is marked otherwise.
+
+### On `Position`
+
+| Call | Returns | Cost |
+| --- | --- | --- |
+| `pos.own_marbles()` | Marbles `pos.to_move` still has on the board | O(1) |
+| `pos.enemy_marbles()` | Marbles the opponent still has on the board | O(1) |
+
+Both are derived from the push-off counters the board maintains
+(`kMarblesPerPlayer - board.losses(...)`), not by scanning cells. A material term is then
+just:
+
+```cpp
+const int material = pos.own_marbles() - pos.enemy_marbles();
+```
+
+Note these read `pos.to_move`, i.e. the *root* side. Inside a search you are looking at
+boards for both colours, so at internal nodes use the `Board` calls below with an explicit
+player and negate for the side to move as usual.
+
+### On `Board`
+
+| Call | Returns | Cost |
+| --- | --- | --- |
+| `board.at(coord)` | `Cell::kEmpty` / `kBlack` / `kWhite` / `kOffBoard` | O(1) |
+| `board.losses(p)` | Marbles of `p` pushed off; 6 means `p` has lost | O(1) |
+| `board.marbles(p)` | Marbles of `p` on the board | **O(61)** — scans every cell |
+| `Board::cells()` | The 61 playable coordinates, stable order | O(1) to obtain |
+
+`board.marbles(p)` and `kMarblesPerPlayer - board.losses(p)` give the same answer; prefer
+the second one in hot code. Use `Board::cells()` when you genuinely need to walk the whole
+board, e.g. a centre-of-mass or cohesion term.
+
+### Geometry (`board.hpp`)
+
+| Call | Returns |
+| --- | --- |
+| `step(coord, dir)` | The neighbour of `coord` in `dir` |
+| `on_board(coord)` | Whether a coordinate is one of the 61 playable cells |
+| `opposite(dir)` | The reverse direction; `kDirOffsets[i]` and `[i+3]` are opposites |
+| `other(player)` | The other player |
+| `to_cell(player)` | The `Cell` value matching a player |
+| `coord_to_string(coord)` / `parse_coord(text, &out)` | Notation such as `"E5"` |
+
+The six directions are `kEast`, `kNorthEast`, `kNorthWest`, `kWest`, `kSouthWest`,
+`kSouthEast`, and the axial layout means those offsets are valid everywhere on the board —
+no special cases above or below the middle row.
+
+### Moves (`move.hpp`)
+
+| Call | Returns |
+| --- | --- |
+| `generate_moves(board, p)` | All legal moves for `p`, deterministic order |
+| `apply_move(&board, p, move)` | Applies a move in place, updating losses |
+| `move.marbles()` | The moved coordinates, head first |
+| `move.to_string()` | Readable notation, for debugging output |
+
+`Move` also carries `pushed` (how many opposing marbles a sumito displaces) and
+`pushes_off` (true when one of them leaves the board) — both are filled in by the generator,
+so move-ordering heuristics can read them without simulating anything.
+
 ## The two rules you must follow
 
 **1. Submit a legal move before you start thinking.**

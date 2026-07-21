@@ -45,5 +45,13 @@ above and below the middle row. `kDirOffsets[i]` and `kDirOffsets[i+3]` are oppo
 
 ## Status
 
-Written but **never compiled** — this machine has no working C++ toolchain (see
-`docs/toolchain_setup.md`). Before trusting any of it, get it building and run the tests.
+**Compiles successfully.** The toolchain on this machine works (see
+`docs/toolchain_setup.md`); build and run the tests as usual when changing the engine.
+
+## Agent helpers
+
+Shared conveniences for user-written AIs live on `Position` (in `agent.hpp`) and are
+documented under "Helper functions" in `docs/writing_agents.md`. Keep that section in sync
+whenever a helper is added — it is the reference the user writes bots against. Helpers must
+stay cheap enough to call inside a search loop; prefer values the engine already tracks
+(e.g. `kMarblesPerPlayer - board.losses(p)`) over rescanning the 61 cells.
