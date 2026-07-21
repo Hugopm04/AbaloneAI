@@ -43,11 +43,19 @@ if(ABALONE_GUI)
 endif()
 
 # ---------------------------------------------------------------------------
-# Add your own AIs here. One line per agent source file.
+# Your own AIs. Every .cpp in agents/ is picked up automatically -- drop a file
+# in and build, there is nothing to edit here.
+#
+# CONFIGURE_DEPENDS makes the build system re-run this glob when the contents of
+# agents/ change, so a newly added file is noticed without a manual re-configure.
+# It is checked at build time by Ninja and Make; if you ever switch generators
+# and a new agent does not appear, re-run cmake to refresh the list.
 # ---------------------------------------------------------------------------
-set(AGENT_SOURCES
-  agents/random_agent.cpp
-)
+file(GLOB AGENT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/agents/*.cpp")
+
+if(NOT AGENT_SOURCES)
+  message(FATAL_ERROR "No agent sources found in agents/ -- at least one agent is required.")
+endif()
 
 set(ENGINE_SOURCES
   src/board.cpp

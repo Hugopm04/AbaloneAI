@@ -4,14 +4,19 @@ Everything you need is in `include/abalone/agent.hpp`, and
 [`agents/random_agent.cpp`](../agents/random_agent.cpp) is a complete, heavily commented
 example. Copy that file to start.
 
-## The four steps
+## The three steps
 
 1. Create `agents/my_agent.cpp`.
 2. Subclass `abalone::Agent`; implement `name()` and `choose_move()`.
 3. `REGISTER_AGENT(MyAgent);` at file scope.
-4. Add the file to `AGENT_SOURCES` in `CMakeLists.txt`.
 
-It now appears in the main menu and in the arena. No other wiring.
+Rebuild and it appears in the main menu, in the arena and in `abalone --help`. Every `.cpp`
+in `agents/` is compiled automatically — there is no build file to edit.
+
+If a new agent does not show up, it is almost always one of two things: the file is not in
+`agents/` (only that directory is scanned), or `REGISTER_AGENT` is missing. The menu is
+built from the registry, so an unregistered agent is invisible everywhere at once rather
+than just in the GUI.
 
 ## What you get
 

@@ -7,7 +7,8 @@
 //   1. Subclass Agent.
 //   2. Implement name() and choose_move().
 //   3. REGISTER_AGENT(YourType) at the bottom.
-//   4. Add the file to AGENT_SOURCES in CMakeLists.txt.
+//
+// Every .cpp in agents/ is compiled automatically, so there is no build file to edit.
 //
 // It then shows up in the main menu and in the arena with no further wiring.
 

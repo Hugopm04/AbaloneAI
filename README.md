@@ -124,7 +124,8 @@ public:
 REGISTER_AGENT(MyAgent);
 ```
 
-Add the file to `AGENT_SOURCES` in `CMakeLists.txt` and it appears in the menu automatically.
+Save it anywhere in `agents/` and rebuild — every `.cpp` there is compiled and registered
+automatically, so it appears in the menu with no build file to edit.
 
 Your evaluator does not have to recompute what the engine already tracks —
 `marbles_left(board, p)`, `is_eliminated(board, p)` and `game_over(board)` are all O(1).

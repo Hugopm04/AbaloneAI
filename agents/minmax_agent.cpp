@@ -48,15 +48,18 @@ public:
         // bail out when ctx.deadline_passed() turns true. Random has nothing
         // to think about, so it just returns.
 
-        for (int depth = 1; depth < MAX_DEPTH; ++depth) {
-            std::optional<Move> best = search(pos, depth, ctx);
-            if (ctx.deadline_passed()) break;   // depth incomplete, discard it
-            if (best) ctx.submit(*best);        // only submit completed depths
+        float best_score = -std::numeric_limits<float>::max();
+        auto best_move = pos.legal.front();
+        for (const abalone::Move& m : pos.legal) {
+            abalone::Board next = pos.board;
+            abalone::apply_move(&next, pos.to_move, m);
+            const float score = -search(next, abalone::other(pos.to_move), MAX_DEPTH - 1, ctx);
+            if (score > best_score) { best_score = score; best_move = m; }
         }
     }
 
 private:
-    const int MAX_DEPTH = 5;
+    const int MAX_DEPTH = 3;
 
     float search(const abalone::Board& board, abalone::Player p, int depth, abalone::SearchContext& ctx) {
         if (depth == 0 || abalone::game_over(board)) {
@@ -77,13 +80,13 @@ private:
         return best;
     }
 
-    float evaluate(const Board& board, const abalone::Position& pos) const {
+    float evaluate(const abalone::Board& board, const abalone::Player& p) const {
         int own_losses = board.losses(p);
         if (own_losses == 6){
             return NEG_INFINITE;
         }
 
-        int enemy_losses = board.losses(abalone::other);
+        int enemy_losses = board.losses(abalone::other(p));
         if (enemy_losses == 6){
             return POS_INFINITE;
         }
@@ -91,7 +94,7 @@ private:
         float puntuation = 0;
 
         int own_marbles = board.marbles(p);
-        int enemy_marbles = board.marbles(abalone::other);
+        int enemy_marbles = board.marbles(abalone::other(p));
 
         puntuation = own_marbles - enemy_marbles;
         
@@ -101,4 +104,4 @@ private:
 
 }  // namespace
 
-REGISTER_AGENT(RandomAgent);
+REGISTER_AGENT(MinMaxAgent);

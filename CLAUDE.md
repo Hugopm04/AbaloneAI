@@ -7,7 +7,7 @@ Abalone (the hex-board marble-pushing game), **not** Avalon. C++17, no external 
 ```
 include/abalone/   public headers (board, move, agent, game, ui, gui, arena)
 src/               engine implementation + main.cpp + gui.cpp (raylib, optional)
-agents/            user-written AIs; add new files to AGENT_SOURCES in CMakeLists.txt
+agents/            user-written AIs; every .cpp here is globbed into the build
 tests/             assert-based rule tests, no framework
 docs/              writing_agents.md, toolchain_setup.md
 ```
