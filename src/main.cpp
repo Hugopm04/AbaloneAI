@@ -1,12 +1,19 @@
+#include <algorithm>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "abalone/arena.hpp"
 #include "abalone/game.hpp"
 #include "abalone/ui.hpp"
+
+#ifdef ABALONE_GUI
+#include "abalone/gui.hpp"
+#endif
 
 namespace {
 
@@ -204,9 +211,148 @@ void main_menu() {
     }
 }
 
+// --- command line -----------------------------------------------------------
+
+void print_usage() {
+    std::cout <<
+        "Abalone engine + AI workspace\n\n"
+        "Usage: abalone [options]\n\n"
+        "  (no options)         graphical window\n"
+        "  --tui                terminal UI instead of the window\n"
+        "  --headless           batch AI-vs-AI games, no UI at all; prints statistics\n"
+        "  -h, --help           this message\n\n"
+        "Headless options (for training and benchmarking):\n"
+        "  --black NAME         agent for Black   (default: first registered)\n"
+        "  --white NAME         agent for White   (default: same as --black)\n"
+        "  --games N            games to play     (default: 100)\n"
+        "  --move-limit N       cap game length in plies (default: uncapped)\n"
+        "  --time-per-move MS   per-move budget in ms (default: unlimited)\n"
+        "  --opening NAME       classic | belgian  (default: classic)\n"
+        "  --quiet              final statistics only, no per-game lines\n\n"
+        "Registered agents:";
+    if (AgentRegistry::instance().all().empty()) {
+        std::cout << " (none)\n";
+    } else {
+        for (const AgentEntry& a : AgentRegistry::instance().all()) {
+            std::cout << "\n  " << a.name;
+        }
+        std::cout << '\n';
+    }
+}
+
+// Looks an agent up by name. Null (with a message) when it does not exist, so
+// a typo in a training script fails loudly instead of silently benchmarking
+// the wrong bot.
+const AgentEntry* find_agent(const std::string& name) {
+    for (const AgentEntry& a : AgentRegistry::instance().all()) {
+        if (a.name == name) return &a;
+    }
+    std::cerr << "error: no agent named '" << name << "'. Use --help to list them.\n";
+    return nullptr;
+}
+
+int run_headless(const std::vector<std::string>& args) {
+    const auto& all = AgentRegistry::instance().all();
+    if (all.empty()) {
+        std::cerr << "error: no agents are registered; nothing to run.\n";
+        return 1;
+    }
+
+    std::string black_name, white_name;
+    int games = 100;
+    bool quiet = false;
+
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        const bool has_value = (i + 1 < args.size());
+        const std::string value = has_value ? args[i + 1] : std::string();
+
+        auto need = [&](const char* what) {
+            if (!has_value) std::cerr << "error: " << what << " needs a value.\n";
+            return has_value;
+        };
+
+        if (a == "--headless" || a == "--quiet") {
+            quiet = quiet || (a == "--quiet");
+        } else if (a == "--black") {
+            if (!need("--black")) return 1;
+            black_name = value; ++i;
+        } else if (a == "--white") {
+            if (!need("--white")) return 1;
+            white_name = value; ++i;
+        } else if (a == "--games") {
+            if (!need("--games")) return 1;
+            games = std::atoi(value.c_str()); ++i;
+        } else if (a == "--move-limit") {
+            if (!need("--move-limit")) return 1;
+            const int n = std::atoi(value.c_str());
+            g_config.move_limit = (n > 0) ? std::optional<int>(n) : std::nullopt;
+            ++i;
+        } else if (a == "--time-per-move") {
+            if (!need("--time-per-move")) return 1;
+            const int n = std::atoi(value.c_str());
+            g_config.time_per_move =
+                (n > 0) ? std::optional<std::chrono::milliseconds>(std::chrono::milliseconds(n))
+                        : std::nullopt;
+            ++i;
+        } else if (a == "--opening") {
+            if (!need("--opening")) return 1;
+            Opening o;
+            if (!parse_opening(value, &o)) {
+                std::cerr << "error: unknown opening '" << value << "'.\n";
+                return 1;
+            }
+            g_config.opening = o;
+            ++i;
+        } else {
+            std::cerr << "error: unrecognised option '" << a << "'. Use --help.\n";
+            return 1;
+        }
+    }
+
+    if (games <= 0) {
+        std::cerr << "error: --games must be positive.\n";
+        return 1;
+    }
+
+    const AgentEntry* black = black_name.empty() ? &all[0] : find_agent(black_name);
+    if (!black) return 1;
+    const AgentEntry* white = white_name.empty() ? black : find_agent(white_name);
+    if (!white) return 1;
+
+    const ArenaResult r =
+        run_match(*black, *white, g_config, games, quiet ? nullptr : &std::cout);
+    render_arena_result(std::cout, r);
+    return 0;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const std::vector<std::string> args(argv + 1, argv + argc);
+
+    for (const std::string& a : args) {
+        if (a == "-h" || a == "--help") {
+            print_usage();
+            return 0;
+        }
+    }
+
+    const bool headless =
+        std::find(args.begin(), args.end(), "--headless") != args.end();
+    const bool tui = std::find(args.begin(), args.end(), "--tui") != args.end();
+
+    if (headless) return run_headless(args);
+
+    if (!tui) {
+#ifdef ABALONE_GUI
+        return run_gui(g_config);
+#else
+        std::cout << "This build has no graphical UI (built with -DABALONE_GUI=OFF).\n"
+                     "Falling back to the terminal UI.\n";
+#endif
+    }
+
     std::cout << "Abalone engine + AI workspace\n";
     main_menu();
     return 0;

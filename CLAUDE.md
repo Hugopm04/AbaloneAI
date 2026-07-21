@@ -5,8 +5,8 @@ Abalone (the hex-board marble-pushing game), **not** Avalon. C++17, no external 
 ## Layout
 
 ```
-include/abalone/   public headers (board, move, agent, game, ui, arena)
-src/               engine implementation + main.cpp
+include/abalone/   public headers (board, move, agent, game, ui, gui, arena)
+src/               engine implementation + main.cpp + gui.cpp (raylib, optional)
 agents/            user-written AIs; add new files to AGENT_SOURCES in CMakeLists.txt
 tests/             assert-based rule tests, no framework
 docs/              writing_agents.md, toolchain_setup.md
@@ -15,8 +15,19 @@ docs/              writing_agents.md, toolchain_setup.md
 ## Design decisions already made
 
 - **Pure C++.** No Python bindings — the user writes AIs in C++.
-- **Terminal UI only.** Headless batch play matters more than graphics; the arena needs to
-  run many games fast.
+- **Graphical UI is the default front end** (raylib, `src/gui.cpp`), because entering moves
+  as `C3 C5 NE` was too cumbersome — you click a marble group, then click where it goes.
+  This *reverses* two earlier decisions ("terminal UI only", "no external dependencies");
+  it was an explicit user decision, so do not revert it.
+  - The terminal UI is still fully supported and lives on under `--tui`. Do not delete it.
+  - **raylib is confined to the `abalone` executable.** The engine library, the agents and
+    the arena must never link it, so headless training still builds and runs on a machine
+    with no GPU, no display and no raylib. `-DABALONE_GUI=OFF` must always keep working.
+  - Detect raylib with the hand-rolled `find_path`/`find_library` in `CMakeLists.txt`, not
+    `find_package(raylib)` — MSYS2's config resolves paths via pkg-config and silently
+    reports success with an empty include dir when pkg-config is absent.
+- **Headless batch play still matters most.** The arena needs to run many games fast;
+  `--headless` takes the whole match configuration from the command line for exactly that.
 - **Classic opening is the default**, Belgian Daisy is selectable.
 - **Move limits are optional.** Games are uncapped unless a limit is set. Do not hardcode one.
 - **Time limits are engine-enforced.** Agents run on a worker thread and cannot overrun their

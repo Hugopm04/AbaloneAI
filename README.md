@@ -11,16 +11,60 @@ no randomness — which makes it a clean testbed for search-based AI.
 Requires a C++17 compiler and CMake 3.16+.
 
 ```sh
-cmake -S . -B build
-cmake --build build --config Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
+
+The graphical UI needs **raylib** (`pacman -S mingw-w64-ucrt-x86_64-raylib` on MSYS2). If it
+isn't installed the build still succeeds, just without the window — or disable it explicitly
+with `-DABALONE_GUI=OFF`, which is what you want on a headless training box.
 
 Then run the game:
 
 ```sh
 ./build/abalone          # Linux/macOS
-build\Release\abalone    # Windows
+.\build\abalone.exe      # Windows (PowerShell)
 ```
+
+The `.\` prefix is required in PowerShell. Note that Ninja is single-config, so the
+executable lands directly in `build/` — there is no `build/Release/` subdirectory. If you
+build with the Visual Studio generator instead, it *is* `build\Release\abalone.exe`.
+
+## Three ways to run it
+
+| Command | What you get |
+|---|---|
+| `abalone` | **Graphical window** (default) — click a marble group, click where it goes |
+| `abalone --tui` | The original terminal UI, with typed `C3 C5 NE` notation |
+| `abalone --headless` | No UI at all: batch AI-vs-AI games and statistics, for training |
+
+### Playing in the window
+
+Click one, two or three of your own marbles to select a line. Every square you can legally
+move that group to lights up, colour-coded — **green** a quiet move, **orange** a push,
+**red** a push that knocks a marble off the edge. Click one to play it. Click an empty
+square or press `Esc` to start over. No coordinates, no direction names.
+
+### Headless batch play
+
+Everything is on the command line, so it scripts cleanly:
+
+```sh
+abalone --headless --black my_agent --white random --games 500 --move-limit 400 --quiet
+```
+
+| Option | Meaning |
+|---|---|
+| `--black NAME` / `--white NAME` | Which agent takes each seat (default: first registered) |
+| `--games N` | Games to play (default: 100) |
+| `--move-limit N` | Cap game length in plies (default: uncapped) |
+| `--time-per-move MS` | Per-move budget (default: unlimited) |
+| `--opening NAME` | `classic` or `belgian` |
+| `--quiet` | Final statistics only, no per-game lines |
+
+Unknown agent names and bad options exit non-zero with a message, so a typo in a training
+script fails loudly instead of quietly benchmarking the wrong bot. `abalone --help` lists
+the registered agents.
 
 And the rule tests:
 
@@ -32,7 +76,7 @@ ctest --test-dir build --output-on-failure
 
 | Mode | What it does |
 |---|---|
-| Human vs Human | Two players at one terminal |
+| Human vs Human | Two players at one screen |
 | Human vs AI | Play any registered agent, either colour |
 | AI vs AI | Watch a single game move by move |
 | Arena | Batch AI-vs-AI games with win rates and search statistics |
