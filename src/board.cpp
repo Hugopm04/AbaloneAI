@@ -172,4 +172,44 @@ Board Board::from_opening(Opening opening) {
     return b;
 }
 
+int arrows(const Board& board, Player p) {
+    const Cell mine = to_cell(p);
+
+    // kDirOffsets[i] and kDirOffsets[i + 3] are opposites, so the first three
+    // directions cover all three axes and every line is visited exactly once.
+    int count = 0;
+    for (const Coord& c : Board::cells()) {
+        if (board.at(c) != mine) continue;
+        for (int d = 0; d < kNumDirections / 2; ++d) {
+            const Coord one = step(c, static_cast<Direction>(d));
+            const Coord two = step(one, static_cast<Direction>(d));
+            // at() is off-board safe, so no on_board() check is needed here.
+            if (board.at(one) == mine && board.at(two) == mine) ++count;
+        }
+    }
+    return count;
+}
+
+int edge_marbles(const Board& board, Player p) {
+    // Edge membership depends only on the geometry, so it is computed once.
+    static const std::array<bool, kRows * kCols> is_edge = [] {
+        std::array<bool, kRows * kCols> table{};
+        for (const Coord& c : Board::cells()) {
+            bool edge = false;
+            for (int d = 0; d < kNumDirections; ++d) {
+                if (!on_board(step(c, static_cast<Direction>(d)))) { edge = true; break; }
+            }
+            table[c.row * kCols + c.col] = edge;
+        }
+        return table;
+    }();
+
+    const Cell mine = to_cell(p);
+    int count = 0;
+    for (const Coord& c : Board::cells()) {
+        if (board.at(c) == mine && is_edge[c.row * kCols + c.col]) ++count;
+    }
+    return count;
+}
+
 }  // namespace abalone

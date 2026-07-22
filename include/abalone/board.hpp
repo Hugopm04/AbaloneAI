@@ -155,20 +155,37 @@ private:
 //
 // These take the board and the player explicitly, so they answer about the
 // position you hand them -- which inside a search is the node you are on, not
-// the root. All are O(1).
+// the root. Each one states its complexity; the O(1) ones are free to call at
+// every leaf, the O(kCells) ones are a full board scan and want more care.
 
-// Marbles `p` still has on the board.
+// Marbles `p` still has on the board. O(1).
 inline int marbles_left(const Board& board, Player p) {
     return board.marbles(p);
 }
 
-// True once `p` has lost 6 marbles, i.e. `p` has lost the game.
+// True once `p` has lost 6 marbles, i.e. `p` has lost the game. O(1).
 inline bool is_eliminated(const Board& board, Player p) {
     return board.losses(p) >= 6;
 }
 
+// O(1).
 inline bool game_over(const Board& board) {
     return is_eliminated(board, Player::kBlack) || is_eliminated(board, Player::kWhite);
 }
+
+// Number of "arrows": three marbles of `p` in a row along a hex axis. A line of
+// four contains two overlapping arrows and is counted as two. Only the three
+// distinct axes are walked, so each line is counted once, not once per
+// direction.
+//
+// O(kCells * kNumDirections / 2) -- a full board scan, ~183 cell probes.
+int arrows(const Board& board, Player p);
+
+// Marbles of `p` sitting on the outer ring of the board, i.e. one push away
+// from being knocked off. A cell is on the edge when at least one of its six
+// neighbours is off the board.
+//
+// O(kCells) -- a full board scan; edge membership itself is a table lookup.
+int edge_marbles(const Board& board, Player p);
 
 }  // namespace abalone

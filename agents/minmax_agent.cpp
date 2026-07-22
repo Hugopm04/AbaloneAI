@@ -36,7 +36,7 @@ public:
         // Submit something immediately. If your search is ever cut off before
         // it submits, the engine has to play a fallback move for you and flags
         // the turn as forfeited -- so always publish a legal move up front.
-        ctx.submit(pos.legal.front());
+        ctx.submit(pos.legal.front(), 0);
 
         // Statistics. A real search separates these two: count_node() for every
         // position you touch, count_eval() only where you run your heuristic.
@@ -54,12 +54,18 @@ public:
             abalone::Board next = pos.board;
             abalone::apply_move(&next, pos.to_move, m);
             const float score = -search(next, abalone::other(pos.to_move), MAX_DEPTH - 1, ctx);
-            if (score > best_score) { best_score = score; best_move = m; }
+            if (score > best_score) {
+                best_score = score;
+                best_move = m;
+                // Submit as we improve, with the score attached so the UI can
+                // show what this move was worth to us.
+                ctx.submit(best_move, best_score);
+            }
         }
     }
 
 private:
-    const int MAX_DEPTH = 3;
+    const int MAX_DEPTH = 4;
 
     float search(const abalone::Board& board, abalone::Player p, int depth, abalone::SearchContext& ctx) {
         if (depth == 0 || abalone::game_over(board)) {
@@ -92,11 +98,29 @@ private:
         }
         
         float puntuation = 0;
-
+        
+        // Own vs Enemy marbles
         int own_marbles = board.marbles(p);
         int enemy_marbles = board.marbles(abalone::other(p));
 
-        puntuation = own_marbles - enemy_marbles;
+        int marble_count_puntuation = own_marbles - enemy_marbles;
+
+        // Nº of Arrows
+        int own_arrows = abalone::edge_marbles(board, p);
+        int enemy_arrows = abalone::edge_marbles(board, abalone::other(p));
+
+        int arrows_puntuation = own_arrows - enemy_arrows;
+
+        // Nº of Edge Marbles
+        int own_edge = abalone::edge_marbles(board, p);
+        int enemy_edge = abalone::edge_marbles(board, abalone::other(p));
+        
+        int edge_puntuation = enemy_edge - own_edge;
+
+        puntuation += 
+        marble_count_puntuation + 
+        arrows_puntuation +
+        edge_puntuation;
         
         return puntuation;
     }

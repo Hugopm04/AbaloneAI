@@ -7,6 +7,7 @@ namespace abalone {
 void SearchContext::begin(std::optional<std::chrono::milliseconds> limit) {
     std::lock_guard<std::mutex> lock(mu_);
     best_.reset();
+    score_.reset();
     nodes_.store(0, std::memory_order_relaxed);
     evals_.store(0, std::memory_order_relaxed);
     start_ = Clock::now();
@@ -16,6 +17,20 @@ void SearchContext::begin(std::optional<std::chrono::milliseconds> limit) {
 void SearchContext::submit(const Move& move) {
     std::lock_guard<std::mutex> lock(mu_);
     best_ = move;
+    // A move submitted without a score clears the previous one rather than
+    // leaving a stale number attached to a different move.
+    score_.reset();
+}
+
+void SearchContext::submit(const Move& move, double score) {
+    std::lock_guard<std::mutex> lock(mu_);
+    best_ = move;
+    score_ = score;
+}
+
+std::optional<double> SearchContext::score() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return score_;
 }
 
 std::optional<Move> SearchContext::best() const {

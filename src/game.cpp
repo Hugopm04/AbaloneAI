@@ -66,61 +66,104 @@ bool Game::undo() {
     return true;
 }
 
-MoveReport Game::play_agent_turn(const std::shared_ptr<Agent>& agent) {
-    // Everything the worker touches is shared_ptr-owned, so an overrunning
-    // search still has valid memory to write into after we walk away.
-    auto legal = std::make_shared<std::vector<Move>>(legal_moves());
-    auto snapshot = std::make_shared<Board>(board_);
-    auto ctx = std::make_shared<SearchContext>();
+// One agent turn in flight. Everything the worker touches is shared_ptr-owned,
+// so an overrunning search still has valid memory to write into after we walk
+// away from it.
+struct Game::PendingTurn {
+    std::shared_ptr<Agent> agent;
+    std::shared_ptr<SearchContext> ctx;
+    std::shared_ptr<std::vector<Move>> legal;
+    std::shared_ptr<Board> snapshot;
+    std::thread worker;
+    std::future<void> finished;
+    Clock::time_point started{};
+    std::optional<Clock::time_point> deadline;
+};
 
-    const Position pos{*snapshot, to_move_, ply_, *legal};
-    ctx->begin(config_.time_per_move);
+Game::~Game() {
+    // A search still running at teardown outlives us on a detached thread; its
+    // context is kept alive by abandoned_searches().
+    if (pending_) {
+        pending_->worker.detach();
+        abandoned_searches().push_back(
+            Abandoned{pending_->agent, pending_->ctx, pending_->legal, pending_->snapshot});
+    }
+}
 
-    const auto started = Clock::now();
+void Game::begin_agent_turn(const std::shared_ptr<Agent>& agent) {
+    auto p = std::make_unique<PendingTurn>();
+    p->agent = agent;
+    p->legal = std::make_shared<std::vector<Move>>(legal_moves());
+    p->snapshot = std::make_shared<Board>(board_);
+    p->ctx = std::make_shared<SearchContext>();
+    p->ctx->begin(config_.time_per_move);
+    p->started = Clock::now();
+    if (config_.time_per_move) p->deadline = p->started + *config_.time_per_move;
+
+    const Position pos{*p->snapshot, to_move_, ply_, *p->legal};
 
     // `done` is signalled by the worker; we wait on it rather than joining so
     // that a runaway agent cannot hold the game hostage.
     auto done = std::make_shared<std::promise<void>>();
-    std::future<void> finished = done->get_future();
+    p->finished = done->get_future();
+    p->worker = std::thread(
+        [agent, ctx = p->ctx, legal = p->legal, snapshot = p->snapshot, done, pos]() {
+            agent->choose_move(pos, *ctx);
+            done->set_value();
+        });
 
-    std::thread worker([agent, ctx, legal, snapshot, done, pos]() {
-        agent->choose_move(pos, *ctx);
-        done->set_value();
-    });
+    pending_ = std::move(p);
+}
 
-    bool timed_out = false;
-    if (config_.time_per_move) {
-        if (finished.wait_for(*config_.time_per_move) != std::future_status::ready) {
-            timed_out = true;
-        }
-    } else {
-        finished.wait();
+bool Game::agent_turn_ready() const {
+    if (!pending_) return false;
+    if (pending_->finished.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        return true;
     }
+    return pending_->deadline && Clock::now() >= *pending_->deadline;
+}
 
-    if (timed_out) {
-        worker.detach();
-        abandoned_searches().push_back(Abandoned{agent, ctx, legal, snapshot});
+MoveReport Game::finish_agent_turn() {
+    std::unique_ptr<PendingTurn> p = std::move(pending_);
+
+    const bool done_on_time =
+        p->finished.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    if (done_on_time) {
+        p->worker.join();
     } else {
-        worker.join();
+        p->worker.detach();
+        abandoned_searches().push_back(Abandoned{p->agent, p->ctx, p->legal, p->snapshot});
     }
 
     MoveReport report;
-    report.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
-    report.nodes = ctx->nodes();
-    report.evals = ctx->evals();
-    report.timed_out = timed_out;
+    report.elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - p->started);
+    report.nodes = p->ctx->nodes();
+    report.evals = p->ctx->evals();
+    report.timed_out = !done_on_time;
+    report.score = p->ctx->score();
 
-    if (const std::optional<Move> best = ctx->best()) {
+    if (const std::optional<Move> best = p->ctx->best()) {
         report.move = *best;
     } else {
         // Nothing was submitted in time. Play a legal move so the game can
         // continue, and flag it loudly -- this is an agent bug.
-        report.move = legal->front();
+        report.move = p->legal->front();
         report.forfeited = true;
     }
 
     play(report.move, report);
     return report;
+}
+
+MoveReport Game::play_agent_turn(const std::shared_ptr<Agent>& agent) {
+    begin_agent_turn(agent);
+    if (pending_->deadline) {
+        pending_->finished.wait_until(*pending_->deadline);
+    } else {
+        pending_->finished.wait();
+    }
+    return finish_agent_turn();
 }
 
 }  // namespace abalone

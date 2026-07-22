@@ -54,7 +54,27 @@ search loop unless it is marked otherwise.
 | `is_eliminated(board, p)` | True once `p` has lost 6 marbles | O(1) |
 | `game_over(board)` | True when either side has been eliminated | O(1) |
 
-Nothing here scans the board — `Board` keeps the counts up to date as marbles move. A
+### Shape queries
+
+These do scan the 61 cells, so they are cheap enough for a leaf evaluator but are not free
+the way the counters above are. If you call several of them per node, measure.
+
+| Call | Returns | Cost |
+| --- | --- | --- |
+| `arrows(board, p)` | Lines of three marbles of `p` in a row | O(kCells · 3) |
+| `edge_marbles(board, p)` | Marbles of `p` on the outer ring | O(kCells) |
+
+`arrows` walks only the three distinct axes (opposite directions would count each line
+twice), and a line of four counts as two overlapping arrows. `edge_marbles` counts marbles
+one push away from falling off — a position with many of them is dangerous even when the
+material is level:
+
+```cpp
+const int shape = 2 * (arrows(board, p) - arrows(board, other(p)))
+                - (edge_marbles(board, p) - edge_marbles(board, other(p)));
+```
+
+Nothing in *Position queries* scans the board — `Board` keeps the counts up to date as marbles move. A
 material term is then:
 
 ```cpp

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
@@ -133,6 +134,11 @@ struct App {
     int black_agent = 0;
     int white_agent = 0;
 
+    // Settings: the time cap is typed rather than cycled, so any budget is
+    // reachable. Empty (or 0) means unlimited.
+    bool editing_time = false;
+    std::string time_buf;
+
     // Live game.
     std::unique_ptr<Game> game;
     std::shared_ptr<Agent> black_ai;
@@ -204,6 +210,9 @@ void begin_turn(App& app) {
 }
 
 void undo_ply(App& app) {
+    // Taking a move back under a running search would leave that search about
+    // to play into a position it never looked at.
+    if (app.game->agent_turn_pending()) return;
     if (!app.game->undo()) return;
     app.banner.clear();
     app.last_ai.reset();
@@ -319,6 +328,15 @@ void draw_side_panel(App& app, Rectangle r) {
         y += 34;
     }
 
+    if (app.game->agent_turn_pending()) {
+        // A dot count keeps it visibly animated, which is the point: the window
+        // is live while the agent thinks.
+        const int dots = static_cast<int>(GetTime() * 3) % 4;
+        DrawText(TextFormat("%s thinking%.*s", app.last_ai_who.c_str(), dots, "..."),
+                 static_cast<int>(r.x + 18), static_cast<int>(y), 18, kPush);
+        y += 30;
+    }
+
     // Last AI search. nodes/evals split apart as pruning improves, so both are
     // shown, plus the rate, which is the number that moves when you optimise.
     if (app.last_ai) {
@@ -340,6 +358,9 @@ void draw_side_panel(App& app, Rectangle r) {
         stat("nodes", TextFormat("%llu", static_cast<unsigned long long>(s.nodes)));
         stat("evals", TextFormat("%llu", static_cast<unsigned long long>(s.evals)));
         stat("nodes/s", secs > 0 ? TextFormat("%.0f", s.nodes / secs) : "--");
+        // The agent's own verdict on the position it moved into, in whatever
+        // unit its evaluator uses. Blank when the agent never reports one.
+        stat("score", s.score ? TextFormat("%+.2f", *s.score) : "not reported");
         if (s.forfeited) {
             DrawText("forfeited (agent bug)", static_cast<int>(r.x + 26),
                      static_cast<int>(y), 16, kPushOff);
@@ -401,7 +422,7 @@ void draw_side_panel(App& app, Rectangle r) {
     }
 
     if (button(Rectangle{r.x + 16, y, r.width - 32, 34}, "Undo  [backspace]",
-               app.game->can_undo())) {
+               app.game->can_undo() && !app.game->agent_turn_pending())) {
         undo_ply(app);
     }
     y += 42;
@@ -452,6 +473,18 @@ void handle_board_click(App& app, const Layout& lo) {
 }
 
 void step_ai(App& app) {
+    // A search already in flight: collect it the moment it is done, and keep
+    // drawing frames until then. Never wait here -- that is what used to
+    // freeze the window for the whole of the agent's thinking time.
+    if (app.game->agent_turn_pending()) {
+        if (!app.game->agent_turn_ready()) return;
+        const MoveReport r = app.game->finish_agent_turn();
+        app.last_ai = r;
+        app.banner = r.forfeited ? "Agent forfeited a turn (bug in the agent)." : "";
+        begin_turn(app);
+        return;
+    }
+
     if (app.game->over() || app.human_turn()) return;
     if (app.step_mode) {
         if (!app.step_armed) return;
@@ -468,10 +501,8 @@ void step_ai(App& app) {
     }
 
     app.last_ai_who = who->name();
-    const MoveReport r = app.game->play_agent_turn(who);
-    app.last_ai = r;
-    app.banner = r.forfeited ? "Agent forfeited a turn (bug in the agent)." : "";
-    begin_turn(app);
+    app.last_ai.reset();
+    app.game->begin_agent_turn(who);
 }
 
 // --- screens ----------------------------------------------------------------
@@ -572,17 +603,46 @@ void screen_settings(App& app) {
     }
     y += 70;
 
-    DrawText("Time per AI move", static_cast<int>(x), static_cast<int>(y), 20, kInkDim);
+    DrawText("Time per AI move (ms, blank = unlimited)", static_cast<int>(x),
+             static_cast<int>(y), 20, kInkDim);
     y += 28;
     {
+        const Rectangle field{x, y, w, 44};
         const int cur = app.config.time_per_move
                             ? static_cast<int>(app.config.time_per_move->count())
                             : 0;
-        if (button(Rectangle{x, y, w, 44}, cur ? TextFormat("%d ms", cur) : "unlimited")) {
-            const int next = (cur == 0) ? 100 : (cur == 100) ? 500 : (cur == 500) ? 2000 : 0;
+
+        const auto commit = [&app] {
+            const long v = app.time_buf.empty() ? 0 : std::strtol(app.time_buf.c_str(), nullptr, 10);
             app.config.time_per_move =
-                next ? std::optional<std::chrono::milliseconds>(std::chrono::milliseconds(next))
-                     : std::nullopt;
+                v > 0 ? std::optional<std::chrono::milliseconds>(std::chrono::milliseconds(v))
+                      : std::nullopt;
+            app.editing_time = false;
+        };
+
+        if (app.editing_time) {
+            // Digits only; the field is a bare number of milliseconds.
+            for (int ch = GetCharPressed(); ch > 0; ch = GetCharPressed()) {
+                if (ch >= '0' && ch <= '9' && app.time_buf.size() < 7) {
+                    app.time_buf.push_back(static_cast<char>(ch));
+                }
+            }
+            if (IsKeyPressed(KEY_BACKSPACE) && !app.time_buf.empty()) app.time_buf.pop_back();
+            if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) commit();
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+                !CheckCollisionPointRec(GetMousePosition(), field)) {
+                commit();
+            }
+
+            DrawRectangleRounded(field, 0.22f, 6, Color{30, 32, 38, 255});
+            DrawRectangleRoundedLines(field, 0.22f, 6, kSelect);
+            const std::string shown = app.time_buf + "_";
+            DrawText(shown.c_str(), static_cast<int>(field.x + 14),
+                     static_cast<int>(field.y + 12), 20, kInk);
+        } else if (button(field, cur ? TextFormat("%d ms  (click to edit)", cur)
+                                     : "unlimited  (click to edit)")) {
+            app.time_buf = cur ? std::to_string(cur) : std::string();
+            app.editing_time = true;
         }
     }
     y += 80;
@@ -626,6 +686,7 @@ int run_gui(GameConfig config) {
     while (!WindowShouldClose() && !app.quit) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (app.screen == Screen::kMenu) break;
+            app.editing_time = false;  // abandon a half-typed time cap
             app.screen = Screen::kMenu;
         }
 

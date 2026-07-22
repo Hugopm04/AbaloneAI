@@ -47,6 +47,10 @@ struct MoveReport {
     // time-limited search.
     bool timed_out = false;
 
+    // What the agent thought the position was worth after its move, if it
+    // supplied a score to submit(). Unset when the agent never reported one.
+    std::optional<double> score;
+
     // The agent submitted nothing before the deadline, so the engine played a
     // fallback move on its behalf. Always a bug in the agent.
     bool forfeited = false;
@@ -77,9 +81,28 @@ public:
 
     // Runs one agent turn under the configured time limit and plays the
     // result. The limit is enforced by the engine; an agent cannot exceed it.
+    // Blocks until the agent is done, so it suits headless batch play.
     MoveReport play_agent_turn(const std::shared_ptr<Agent>& agent);
 
+    // The same turn, split so a caller with a frame loop never blocks:
+    //
+    //   begin_agent_turn(agent);        // starts the search, returns at once
+    //   while (!agent_turn_ready()) {}  // draw frames here instead
+    //   finish_agent_turn();            // collects stats and plays the move
+    //
+    // The board is not touched until finish_agent_turn(), so it stays safe to
+    // read and draw for the whole search.
+    void begin_agent_turn(const std::shared_ptr<Agent>& agent);
+    bool agent_turn_pending() const { return pending_ != nullptr; }
+    bool agent_turn_ready() const;
+    MoveReport finish_agent_turn();
+
+    ~Game();
+
 private:
+    struct PendingTurn;
+    std::unique_ptr<PendingTurn> pending_;
+
     GameConfig config_;
     Board board_;
     Player to_move_ = Player::kBlack;

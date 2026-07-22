@@ -48,6 +48,12 @@ public:
     // then again each time your search improves on it.
     void submit(const Move& move);
 
+    // Same, plus what the search thinks the position is worth after that move,
+    // from the side-to-move's point of view (positive = good for you). The
+    // engine only reports it back; it never interprets the number, so use
+    // whatever unit your evaluator works in.
+    void submit(const Move& move, double score);
+
     // True once the time limit has elapsed. Unlimited searches never see true.
     bool deadline_passed() const;
 
@@ -61,12 +67,16 @@ public:
 
     void begin(std::optional<std::chrono::milliseconds> limit);
     std::optional<Move> best() const;
+
+    // Score attached to the last submit(), if the agent supplied one.
+    std::optional<double> score() const;
     std::uint64_t nodes() const { return nodes_.load(std::memory_order_relaxed); }
     std::uint64_t evals() const { return evals_.load(std::memory_order_relaxed); }
 
 private:
     mutable std::mutex mu_;
     std::optional<Move> best_;
+    std::optional<double> score_;
 
     std::atomic<std::uint64_t> nodes_{0};
     std::atomic<std::uint64_t> evals_{0};
