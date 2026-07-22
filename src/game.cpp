@@ -49,10 +49,21 @@ Result Game::result() const {
 }
 
 void Game::play(const Move& move, const MoveReport& report) {
+    past_.push_back(board_);
     apply_move(&board_, to_move_, move);
     history_.push_back(report);
     to_move_ = other(to_move_);
     ++ply_;
+}
+
+bool Game::undo() {
+    if (past_.empty()) return false;
+    board_ = past_.back();
+    past_.pop_back();
+    history_.pop_back();
+    to_move_ = other(to_move_);
+    --ply_;
+    return true;
 }
 
 MoveReport Game::play_agent_turn(const std::shared_ptr<Agent>& agent) {

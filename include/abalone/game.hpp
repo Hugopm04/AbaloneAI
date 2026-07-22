@@ -70,6 +70,11 @@ public:
     // Plays `move` and advances the turn.
     void play(const Move& move, const MoveReport& report);
 
+    // Takes back the last ply. Undo is unlimited: every position since the
+    // opening is kept, which costs a padded 9x9 grid per ply and nothing else.
+    bool can_undo() const { return !past_.empty(); }
+    bool undo();
+
     // Runs one agent turn under the configured time limit and plays the
     // result. The limit is enforced by the engine; an agent cannot exceed it.
     MoveReport play_agent_turn(const std::shared_ptr<Agent>& agent);
@@ -80,6 +85,7 @@ private:
     Player to_move_ = Player::kBlack;
     int ply_ = 0;
     std::vector<MoveReport> history_;
+    std::vector<Board> past_;  // board before each played ply, for undo
 };
 
 }  // namespace abalone

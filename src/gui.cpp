@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -143,6 +144,16 @@ struct App {
     bool auto_play = true;
     double next_ai_move_at = 0.0;
 
+    // Step mode: the AI does not start its clock until you ask it to, so a
+    // search can be timed at a chosen position without the preceding moves
+    // warming anything up. Armed by the Think button or the space bar.
+    bool step_mode = false;
+    bool step_armed = false;
+
+    // Stats for the last AI turn played, shown in the side panel.
+    std::optional<MoveReport> last_ai;
+    std::string last_ai_who;
+
     bool human_turn() const {
         if (!game) return false;
         return game->to_move() == Player::kBlack ? human_black : human_white;
@@ -188,7 +199,15 @@ void begin_turn(App& app) {
     app.legal = app.game->legal_moves();
     app.selection.clear();
     app.targets.clear();
+    app.step_armed = false;
     if (!app.human_turn()) app.next_ai_move_at = GetTime() + 0.35;
+}
+
+void undo_ply(App& app) {
+    if (!app.game->undo()) return;
+    app.banner.clear();
+    app.last_ai.reset();
+    begin_turn(app);
 }
 
 void start_game(App& app) {
@@ -198,6 +217,7 @@ void start_game(App& app) {
     if (!app.human_black && !agents().empty()) app.black_ai = agents()[app.black_agent].factory();
     if (!app.human_white && !agents().empty()) app.white_ai = agents()[app.white_agent].factory();
     app.banner.clear();
+    app.last_ai.reset();
     app.screen = Screen::kPlay;
     begin_turn(app);
 }
@@ -299,6 +319,43 @@ void draw_side_panel(App& app, Rectangle r) {
         y += 34;
     }
 
+    // Last AI search. nodes/evals split apart as pruning improves, so both are
+    // shown, plus the rate, which is the number that moves when you optimise.
+    if (app.last_ai) {
+        const MoveReport& s = *app.last_ai;
+        const auto ms = s.elapsed.count();
+        DrawText(TextFormat("%s search", app.last_ai_who.c_str()),
+                 static_cast<int>(r.x + 18), static_cast<int>(y), 18, kInk);
+        y += 26;
+
+        // Drawn one at a time: TextFormat cycles a small pool of buffers, so
+        // holding several of its results at once is not safe.
+        const double secs = ms > 0 ? ms / 1000.0 : 0.0;
+        auto stat = [&](const char* key, const char* value) {
+            DrawText(key, static_cast<int>(r.x + 26), static_cast<int>(y), 16, kInkDim);
+            DrawText(value, static_cast<int>(r.x + 120), static_cast<int>(y), 16, kInk);
+            y += 21;
+        };
+        stat("time", TextFormat("%lld ms", static_cast<long long>(ms)));
+        stat("nodes", TextFormat("%llu", static_cast<unsigned long long>(s.nodes)));
+        stat("evals", TextFormat("%llu", static_cast<unsigned long long>(s.evals)));
+        stat("nodes/s", secs > 0 ? TextFormat("%.0f", s.nodes / secs) : "--");
+        if (s.forfeited) {
+            DrawText("forfeited (agent bug)", static_cast<int>(r.x + 26),
+                     static_cast<int>(y), 16, kPushOff);
+            y += 21;
+        } else if (s.timed_out) {
+            DrawText("interrupted at deadline", static_cast<int>(r.x + 26),
+                     static_cast<int>(y), 16, kPush);
+            y += 21;
+        } else {
+            DrawText("finished on its own", static_cast<int>(r.x + 26),
+                     static_cast<int>(y), 16, kInkDim);
+            y += 21;
+        }
+        y += 10;
+    }
+
     y += 6;
     if (!app.banner.empty()) {
         DrawText(app.banner.c_str(), static_cast<int>(r.x + 18), static_cast<int>(y), 16, kPush);
@@ -317,12 +374,35 @@ void draw_side_panel(App& app, Rectangle r) {
         y += 24;
     }
 
-    y = r.y + r.height - 132;
-    if (!app.human_turn() && !app.game->over()) {
+    const bool has_ai = !app.human_black || !app.human_white;
+
+    y = r.y + r.height - (has_ai ? 216.0f : 132.0f);
+    if (has_ai) {
         if (button(Rectangle{r.x + 16, y, r.width - 32, 34},
-                   app.auto_play ? "Pause AI" : "Step / Resume")) {
-            app.auto_play = !app.auto_play;
+                   app.step_mode ? "Step mode: on" : "Step mode: off")) {
+            app.step_mode = !app.step_mode;
+            app.step_armed = false;
         }
+        y += 42;
+
+        if (app.step_mode) {
+            // The clock starts when this is pressed, not when the turn began.
+            const bool ready = !app.human_turn() && !app.game->over();
+            if (button(Rectangle{r.x + 16, y, r.width - 32, 34}, "Think now  [space]", ready)) {
+                app.step_armed = true;
+            }
+        } else if (!app.human_turn() && !app.game->over()) {
+            if (button(Rectangle{r.x + 16, y, r.width - 32, 34},
+                       app.auto_play ? "Pause AI" : "Resume AI")) {
+                app.auto_play = !app.auto_play;
+            }
+        }
+        y += 42;
+    }
+
+    if (button(Rectangle{r.x + 16, y, r.width - 32, 34}, "Undo  [backspace]",
+               app.game->can_undo())) {
+        undo_ply(app);
     }
     y += 42;
     if (button(Rectangle{r.x + 16, y, r.width - 32, 34}, "Restart")) start_game(app);
@@ -373,16 +453,23 @@ void handle_board_click(App& app, const Layout& lo) {
 
 void step_ai(App& app) {
     if (app.game->over() || app.human_turn()) return;
-    if (!app.auto_play || GetTime() < app.next_ai_move_at) return;
+    if (app.step_mode) {
+        if (!app.step_armed) return;
+    } else if (!app.auto_play || GetTime() < app.next_ai_move_at) {
+        return;
+    }
 
     const std::shared_ptr<Agent>& who =
         (app.game->to_move() == Player::kBlack) ? app.black_ai : app.white_ai;
     if (!who) {  // no agents registered; nothing we can do
         app.banner = "No agent available for this seat.";
+        app.step_armed = false;
         return;
     }
 
+    app.last_ai_who = who->name();
     const MoveReport r = app.game->play_agent_turn(who);
+    app.last_ai = r;
     app.banner = r.forfeited ? "Agent forfeited a turn (bug in the agent)." : "";
     begin_turn(app);
 }
@@ -508,6 +595,9 @@ void screen_play(App& app) {
     const Rectangle board_area{16, 16, GetScreenWidth() - panel_w - 48.0f,
                                GetScreenHeight() - 32.0f};
     const Layout lo = make_layout(board_area);
+
+    if (IsKeyPressed(KEY_BACKSPACE)) undo_ply(app);
+    if (IsKeyPressed(KEY_SPACE) && app.step_mode) app.step_armed = true;
 
     step_ai(app);
     handle_board_click(app, lo);
