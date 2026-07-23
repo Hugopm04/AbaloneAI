@@ -140,7 +140,14 @@ MoveReport Game::finish_agent_turn() {
         std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - p->started);
     report.nodes = p->ctx->nodes();
     report.evals = p->ctx->evals();
-    report.timed_out = !done_on_time;
+    // A search counts as interrupted whenever its deadline elapsed -- not only
+    // when the engine had to walk away from a still-running worker. A well
+    // behaved agent polls deadline_passed() and returns cooperatively a hair
+    // before the clock, so its worker *does* finish on time; without the
+    // deadline check here that case would misreport as "finished on its own".
+    // With no time limit the deadline never passes, so an untimed search that
+    // returns is correctly reported as having finished.
+    report.timed_out = !done_on_time || p->ctx->deadline_passed();
     report.score = p->ctx->score();
 
     if (const std::optional<Move> best = p->ctx->best()) {
