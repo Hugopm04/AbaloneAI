@@ -18,6 +18,24 @@ If a new agent does not show up, it is almost always one of two things: the file
 built from the registry, so an unregistered agent is invisible everywhere at once rather
 than just in the GUI.
 
+### Copying an existing agent
+
+Starting from a copy of another agent is the fast path, but three names are carried over
+from the original and every one of them must be changed, or the copy quietly collides with
+its parent. Work down this list after pasting:
+
+1. **Rename the class.** `class OldAgent` → `class NewAgent`.
+2. **Change `name()`.** This string is the agent's identity everywhere — the GUI menu,
+   `--headless`, the arena. Two agents with the same `name()` both register, so nothing
+   errors; they just appear as two indistinguishable entries and you cannot tell which one
+   you picked. This is the failure that looks like "my new agent didn't show up".
+3. **Update `description()`** so the menu label is meaningful.
+4. **Fix `REGISTER_AGENT(...)`** at the bottom to name the *new* class, not the old one.
+   (It still compiles if you forget — it just registers the parent class a second time.)
+
+None of these are caught by the compiler, so none of them announce themselves. When in
+doubt, `grep` the file for the old class name and the old `name()` string before building.
+
 ## What you get
 
 ```cpp

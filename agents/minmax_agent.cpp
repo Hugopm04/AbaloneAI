@@ -48,20 +48,25 @@ public:
         // bail out when ctx.deadline_passed() turns true. Random has nothing
         // to think about, so it just returns.
 
-        float best_score = -std::numeric_limits<float>::max();
+        float best_score = NEG_INFINITE;
         auto best_move = pos.legal.front();
-        for (const abalone::Move& m : pos.legal) {
-            abalone::Board next = pos.board;
-            abalone::apply_move(&next, pos.to_move, m);
-            const float score = -search(next, abalone::other(pos.to_move), MAX_DEPTH - 1, ctx);
-            if (score > best_score) {
-                best_score = score;
-                best_move = m;
-                // Submit as we improve, with the score attached so the UI can
-                // show what this move was worth to us.
-                ctx.submit(best_move, best_score);
+        for (int i = 1; i < MAX_DEPTH; i++){
+            for (const abalone::Move& m : pos.legal) {
+                abalone::Board next = pos.board;
+                abalone::apply_move(&next, pos.to_move, m);
+                const float score = -search(next, abalone::other(pos.to_move), i - 1, ctx);
+
+                if (score > best_score) {
+                    best_score = score;
+                    best_move = m;
+
+                    // Submit as we improve, with the score attached so the UI can
+                    // show what this move was worth to us.
+                    ctx.submit(best_move, best_score);
+                }
             }
         }
+
     }
 
 private:
@@ -103,7 +108,7 @@ private:
         int enemy_marbles = board.marbles(abalone::other(p));
 
         float marble_count_puntuation = own_marbles - enemy_marbles; // [-5, 5] -> 10
-        float marble_count_puntuation = (marble_count_puntuation + 5) / 10.0;
+        marble_count_puntuation = (marble_count_puntuation + 5) / 10.0;
 
         // Nº of Arrows
         int own_arrows = abalone::arrows(board, p);

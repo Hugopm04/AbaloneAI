@@ -21,10 +21,10 @@ const float NEG_INFINITE = -POS_INFINITE;
 
 class AlfaBetaAgent : public abalone::Agent {
 public:
-    std::string name() const override { return "minmax"; }
+    std::string name() const override { return "alfabeta"; }
 
     std::string description() const override {
-        return "Basic MinMax Algorithm";
+        return "MinMax with alpha-beta pruning";
     }
 
     // Called once per game. Reseed here so repeated games are not identical.
@@ -106,7 +106,7 @@ private:
         int enemy_marbles = board.marbles(abalone::other(p));
 
         float marble_count_puntuation = own_marbles - enemy_marbles; // [-5, 5] -> 10
-        float marble_count_puntuation = (marble_count_puntuation + 5) / 10.0;
+        marble_count_puntuation = (marble_count_puntuation + 5) / 10.0;
 
         // Nº of Arrows
         int own_arrows = abalone::arrows(board, p);
@@ -128,7 +128,6 @@ private:
         3.5 * edge_puntuation;
         
         return puntuation;// Own vs Enemy marbles
-       
     }
 };
 
