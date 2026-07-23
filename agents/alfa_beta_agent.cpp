@@ -102,30 +102,33 @@ private:
         
         float puntuation = 0;
         
-        // Own vs Enemy marbles
-        int own_marbles = board.marbles(p);
+         int own_marbles = board.marbles(p);
         int enemy_marbles = board.marbles(abalone::other(p));
 
-        int marble_count_puntuation = own_marbles - enemy_marbles;
+        float marble_count_puntuation = own_marbles - enemy_marbles; // [-5, 5] -> 10
+        float marble_count_puntuation = (marble_count_puntuation + 5) / 10.0;
 
         // Nº of Arrows
         int own_arrows = abalone::arrows(board, p);
         int enemy_arrows = abalone::arrows(board, abalone::other(p));
 
-        int arrows_puntuation = own_arrows - enemy_arrows;
+        float arrows_puntuation = own_arrows - enemy_arrows;
+        arrows_puntuation = (arrows_puntuation + 16) / 32.0; // [-16, 16] -> 32
 
         // Nº of Edge Marbles
         int own_edge = abalone::edge_marbles(board, p);
         int enemy_edge = abalone::edge_marbles(board, abalone::other(p));
         
-        int edge_puntuation = enemy_edge - own_edge;
+        float edge_puntuation = enemy_edge - own_edge;
+        edge_puntuation = (edge_puntuation + 14) / 28.0;  // [-14, 14] -> 28
 
-        puntuation += 
-        10 * marble_count_puntuation + 
-        2 * arrows_puntuation +
-        edge_puntuation;
+        puntuation +=
+        5 * marble_count_puntuation + 
+        1.5 * arrows_puntuation +
+        3.5 * edge_puntuation;
         
-        return puntuation;
+        return puntuation;// Own vs Enemy marbles
+       
     }
 };
 
