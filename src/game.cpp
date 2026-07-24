@@ -44,7 +44,15 @@ std::vector<Move> Game::legal_moves() const {
 Result Game::result() const {
     if (board_.losses(Player::kBlack) >= kMarblesToLose) return Result::kWhiteWins;
     if (board_.losses(Player::kWhite) >= kMarblesToLose) return Result::kBlackWins;
-    if (config_.move_limit && ply_ >= *config_.move_limit) return Result::kDraw;
+    if (config_.move_limit && ply_ >= *config_.move_limit) {
+        // Move cap reached with neither side pushed off six marbles: the winner
+        // is whoever has pushed off more of the opponent's. Equal counts draw.
+        const int black_pushed = board_.losses(Player::kWhite);
+        const int white_pushed = board_.losses(Player::kBlack);
+        if (black_pushed > white_pushed) return Result::kBlackWins;
+        if (white_pushed > black_pushed) return Result::kWhiteWins;
+        return Result::kDraw;
+    }
     return Result::kOngoing;
 }
 
