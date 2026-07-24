@@ -154,6 +154,11 @@ struct App {
     bool editing_time = false;
     std::string time_buf;
 
+    // Settings: the move limit is typed too, so any cap is reachable.
+    // Empty (or 0) means uncapped.
+    bool editing_move = false;
+    std::string move_buf;
+
     // Live game.
     std::unique_ptr<Game> game;
     std::shared_ptr<Agent> black_ai;
@@ -369,7 +374,11 @@ void draw_side_panel(App& app, Rectangle r) {
     float y = r.y + 18;
 
     const Game& g = *app.game;
-    centered(TextFormat("Ply %d", g.ply()), 22, cx, y, kInk);
+    if (const auto cap = g.config().move_limit) {
+        centered(TextFormat("Ply %d/%d", g.ply(), *cap), 22, cx, y, kInk);
+    } else {
+        centered(TextFormat("Ply %d", g.ply()), 22, cx, y, kInk);
+    }
     y += 38;
 
     const char* turn = player_name(g.to_move());
@@ -664,14 +673,42 @@ void screen_settings(App& app) {
     }
     y += 70;
 
-    DrawText("Move limit (plies)", static_cast<int>(x), static_cast<int>(y), 20, kInkDim);
+    DrawText("Move limit (plies, blank = uncapped)", static_cast<int>(x),
+             static_cast<int>(y), 20, kInkDim);
     y += 28;
     {
+        const Rectangle field{x, y, w, 44};
         const int cur = app.config.move_limit.value_or(0);
-        if (button(Rectangle{x, y, w, 44}, cur ? TextFormat("%d", cur) : "uncapped")) {
-            // Cycle through a few useful caps; uncapped stays the default.
-            const int next = (cur == 0) ? 200 : (cur == 200) ? 400 : (cur == 400) ? 1000 : 0;
-            app.config.move_limit = next ? std::optional<int>(next) : std::nullopt;
+
+        const auto commit = [&app] {
+            const long v = app.move_buf.empty() ? 0 : std::strtol(app.move_buf.c_str(), nullptr, 10);
+            app.config.move_limit = v > 0 ? std::optional<int>(static_cast<int>(v)) : std::nullopt;
+            app.editing_move = false;
+        };
+
+        if (app.editing_move) {
+            // Digits only; the field is a bare number of plies.
+            for (int ch = GetCharPressed(); ch > 0; ch = GetCharPressed()) {
+                if (ch >= '0' && ch <= '9' && app.move_buf.size() < 7) {
+                    app.move_buf.push_back(static_cast<char>(ch));
+                }
+            }
+            if (IsKeyPressed(KEY_BACKSPACE) && !app.move_buf.empty()) app.move_buf.pop_back();
+            if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) commit();
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+                !CheckCollisionPointRec(GetMousePosition(), field)) {
+                commit();
+            }
+
+            DrawRectangleRounded(field, 0.22f, 6, Color{30, 32, 38, 255});
+            DrawRectangleRoundedLines(field, 0.22f, 6, kSelect);
+            const std::string shown = app.move_buf + "_";
+            DrawText(shown.c_str(), static_cast<int>(field.x + 14),
+                     static_cast<int>(field.y + 12), 20, kInk);
+        } else if (button(field, cur ? TextFormat("%d plies  (click to edit)", cur)
+                                     : "uncapped  (click to edit)")) {
+            app.move_buf = cur ? std::to_string(cur) : std::string();
+            app.editing_move = true;
         }
     }
     y += 70;
@@ -761,6 +798,7 @@ int run_gui(GameConfig config) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (app.screen == Screen::kMenu) break;
             app.editing_time = false;  // abandon a half-typed time cap
+            app.editing_move = false;  // abandon a half-typed move cap
             app.screen = Screen::kMenu;
         }
 
