@@ -47,22 +47,22 @@ public:
         // A searching agent would loop here, deepening and re-submitting, and
         // bail out when ctx.deadline_passed() turns true. Random has nothing
         // to think about, so it just returns.
-
-        float best_score = NEG_INFINITE;
-        auto best_move = pos.legal.front();
-        for (int i = 1; i < MAX_DEPTH; i++){
+        for (int i = 1; i <= MAX_DEPTH; i++){
+            float best_score = NEG_INFINITE;
+            auto best_move = pos.legal.front();
             for (const abalone::Move& m : pos.legal) {
                 abalone::Board next = pos.board;
                 abalone::apply_move(&next, pos.to_move, m);
                 const float score = -search(next, abalone::other(pos.to_move), i - 1, ctx);
+                if (not ctx.deadline_passed()){
+                    if (score > best_score) {
+                        best_score = score;
+                        best_move = m;
 
-                if (score > best_score) {
-                    best_score = score;
-                    best_move = m;
-
-                    // Submit as we improve, with the score attached so the UI can
-                    // show what this move was worth to us.
-                    ctx.submit(best_move, best_score);
+                        // Submit as we improve, with the score attached so the UI can
+                        // show what this move was worth to us.
+                        ctx.submit(best_move, best_score);
+                    }
                 }
             }
         }

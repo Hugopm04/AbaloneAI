@@ -21,7 +21,10 @@ namespace {
 const Color kBg          = {24, 26, 32, 255};
 const Color kPanel       = {34, 37, 45, 255};
 const Color kHole        = {44, 48, 58, 255};
-const Color kBlackMarble = {28, 30, 36, 255};
+// Kept a clear step lighter than both the background and the hole it sits in,
+// or a black marble on a dark board vanishes. The bright rim in draw_marble
+// does the rest of the separating.
+const Color kBlackMarble = {66, 72, 90, 255};
 const Color kWhiteMarble = {232, 231, 226, 255};
 const Color kSelect      = {90, 200, 250, 255};
 const Color kDest        = {80, 220, 140, 255};
@@ -123,6 +126,18 @@ struct Target {
     Move move{};
 };
 
+// A marble knocked off the board, animated flying out past the edge and fading.
+// Purely cosmetic and stored as (cell, direction) rather than pixels so a window
+// resize mid-flight still places it correctly.
+struct FlyOff {
+    Coord from{};
+    Direction dir{};
+    Cell color{};
+    double start = 0.0;
+};
+
+constexpr double kFlyOffSeconds = 0.7;
+
 struct App {
     GameConfig config;
     Screen screen = Screen::kMenu;
@@ -146,6 +161,7 @@ struct App {
     std::vector<Move> legal;
     std::vector<Coord> selection;
     std::vector<Target> targets;
+    std::vector<FlyOff> fly_offs;  // in-flight knock-off animations
     std::string banner;
     bool auto_play = true;
     double next_ai_move_at = 0.0;
@@ -227,6 +243,7 @@ void start_game(App& app) {
     if (!app.human_white && !agents().empty()) app.white_ai = agents()[app.white_agent].factory();
     app.banner.clear();
     app.last_ai.reset();
+    app.fly_offs.clear();
     app.screen = Screen::kPlay;
     begin_turn(app);
 }
@@ -235,7 +252,18 @@ bool selected(const App& app, Coord c) {
     return std::find(app.selection.begin(), app.selection.end(), c) != app.selection.end();
 }
 
+// Spawns the knock-off animation for `m`, if it pushed a marble off. `mover` is
+// the side that made the move, so the marble that flew off is the other colour.
+// Must be called before the move is applied, while `m.head` still refers to the
+// pre-move board.
+void spawn_capture_fx(App& app, const Move& m, Player mover) {
+    if (!m.pushes_off) return;
+    app.fly_offs.push_back(
+        FlyOff{step(m.head, m.dir), m.dir, to_cell(other(mover)), GetTime()});
+}
+
 void play(App& app, const Move& m) {
+    spawn_capture_fx(app, m, app.game->to_move());
     MoveReport report;
     report.move = m;
     app.game->play(m, report);
@@ -244,14 +272,17 @@ void play(App& app, const Move& m) {
 
 // --- board drawing ----------------------------------------------------------
 
-void draw_marble(Vector2 p, float r, Cell what) {
-    const Color base = (what == Cell::kBlack) ? kBlackMarble : kWhiteMarble;
-    DrawCircleV(p, r, base);
-    // A brighter rim plus an offset highlight reads as a sphere without any art.
-    DrawCircleLinesV(p, r, (what == Cell::kBlack) ? Color{70, 74, 86, 255}
-                                                  : Color{170, 168, 160, 255});
+void draw_marble(Vector2 p, float r, Cell what, float alpha = 1.0f) {
+    const bool black = (what == Cell::kBlack);
+    const Color base = black ? kBlackMarble : kWhiteMarble;
+    DrawCircleV(p, r, Fade(base, alpha));
+    // A double rim -- a dark seat under a bright edge -- lifts the marble off
+    // the board it sits in; the offset highlight then reads it as a sphere.
+    DrawCircleLinesV(p, r + 1.0f, Fade(Color{16, 17, 22, 255}, alpha));
+    DrawCircleLinesV(p, r, Fade(black ? Color{120, 130, 156, 255}
+                                      : Color{170, 168, 160, 255}, alpha));
     DrawCircleV(Vector2{p.x - r * 0.30f, p.y - r * 0.32f}, r * 0.22f,
-                (what == Cell::kBlack) ? Color{255, 255, 255, 28} : Color{255, 255, 255, 150});
+                Fade(Color{255, 255, 255, black ? (unsigned char)70 : (unsigned char)150}, alpha));
 }
 
 void draw_board(App& app, const Layout& lo) {
@@ -299,6 +330,39 @@ void draw_board(App& app, const Layout& lo) {
     }
 }
 
+// Draws every in-flight knock-off and drops the ones that have finished. Cheap
+// and self-pruning; when nothing is flying it does nothing at all.
+void draw_fly_offs(App& app, const Layout& lo) {
+    const double now = GetTime();
+    for (const FlyOff& f : app.fly_offs) {
+        const float t = static_cast<float>((now - f.start) / kFlyOffSeconds);
+        if (t < 0.0f || t >= 1.0f) continue;
+
+        // One-cell pixel vector in the fly direction, reused to push the marble
+        // a few cells out past the edge as it goes.
+        const Vector2 origin = cell_center(lo, f.from);
+        const Vector2 one = cell_center(lo, step(f.from, f.dir));
+        const Vector2 v{one.x - origin.x, one.y - origin.y};
+
+        const float ease = t * (2.0f - t);          // fast out, easing to a stop
+        const float dist = 3.2f * ease;
+        const Vector2 pos{origin.x + v.x * dist, origin.y + v.y * dist};
+        const float alpha = 1.0f - t;
+
+        // An expanding red ring at the launch point reads as the impact.
+        const float ring = lo.radius * (0.4f + 1.4f * ease);
+        DrawCircleLinesV(origin, ring, Fade(kPushOff, (1.0f - t) * 0.7f));
+        draw_marble(pos, lo.radius * 0.80f * (1.0f - 0.25f * t), f.color, alpha);
+    }
+
+    app.fly_offs.erase(
+        std::remove_if(app.fly_offs.begin(), app.fly_offs.end(),
+                       [now](const FlyOff& f) {
+                           return (now - f.start) >= kFlyOffSeconds;
+                       }),
+        app.fly_offs.end());
+}
+
 void draw_side_panel(App& app, Rectangle r) {
     DrawRectangleRounded(r, 0.05f, 6, kPanel);
     const float cx = r.x + r.width * 0.5f;
@@ -319,13 +383,20 @@ void draw_side_panel(App& app, Rectangle r) {
         const int lost = g.board().losses(p);
         DrawText(TextFormat("%s lost %d/%d", player_name(p), lost, kMarblesToLose),
                  static_cast<int>(r.x + 18), static_cast<int>(y), 18, kInk);
-        y += 24;
+        y += 26;
+        // A tray of the marbles this side has lost: real marbles of its colour
+        // ringed in red, with empty slots for the ones still on the board. Far
+        // easier to read at a glance than a row of plain dots.
         for (int i = 0; i < kMarblesToLose; ++i) {
-            const Vector2 p2{r.x + 26 + i * 22.0f, y + 8};
-            if (i < lost) DrawCircleV(p2, 8, kPushOff);
-            else          DrawCircleLinesV(p2, 8, kInkDim);
+            const Vector2 p2{r.x + 28 + i * 24.0f, y + 10};
+            if (i < lost) {
+                draw_marble(p2, 10.0f, to_cell(p));
+                DrawCircleLinesV(p2, 11.0f, kPushOff);
+            } else {
+                DrawCircleLinesV(p2, 9.0f, kInkDim);
+            }
         }
-        y += 34;
+        y += 38;
     }
 
     if (app.game->agent_turn_pending()) {
@@ -480,6 +551,8 @@ void step_ai(App& app) {
         if (!app.game->agent_turn_ready()) return;
         const MoveReport r = app.game->finish_agent_turn();
         app.last_ai = r;
+        // The move is already applied, so the mover is now the *other* side.
+        spawn_capture_fx(app, r.move, other(app.game->to_move()));
         app.banner = r.forfeited ? "Agent forfeited a turn (bug in the agent)." : "";
         begin_turn(app);
         return;
@@ -663,6 +736,7 @@ void screen_play(App& app) {
     handle_board_click(app, lo);
 
     draw_board(app, lo);
+    draw_fly_offs(app, lo);  // on top of the board, so a marble flies over it
     draw_side_panel(app, Rectangle{GetScreenWidth() - panel_w - 16.0f, 16, panel_w,
                                    GetScreenHeight() - 32.0f});
 }
