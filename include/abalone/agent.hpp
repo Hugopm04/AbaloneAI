@@ -96,7 +96,8 @@ private:
 struct Position {
     const Board& board;
     Player to_move;
-    int move_number = 0;                  // plies played so far
+    int move_number = 0;                  // plies played so far (the root ply)
+    std::optional<int> move_limit;        // ply cap, or nullopt if uncapped
     const std::vector<Move>& legal;       // pre-generated, never empty
 };
 

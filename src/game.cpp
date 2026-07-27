@@ -41,18 +41,20 @@ std::vector<Move> Game::legal_moves() const {
     return generate_moves(board_, to_move_);
 }
 
+Result result_by_count(const Board& board) {
+    // "Pushed off" for a side is the opponent's loss count.
+    const int black_pushed = board.losses(Player::kWhite);
+    const int white_pushed = board.losses(Player::kBlack);
+    if (black_pushed > white_pushed) return Result::kBlackWins;
+    if (white_pushed > black_pushed) return Result::kWhiteWins;
+    return Result::kDraw;
+}
+
 Result Game::result() const {
     if (board_.losses(Player::kBlack) >= kMarblesToLose) return Result::kWhiteWins;
     if (board_.losses(Player::kWhite) >= kMarblesToLose) return Result::kBlackWins;
-    if (config_.move_limit && ply_ >= *config_.move_limit) {
-        // Move cap reached with neither side pushed off six marbles: the winner
-        // is whoever has pushed off more of the opponent's. Equal counts draw.
-        const int black_pushed = board_.losses(Player::kWhite);
-        const int white_pushed = board_.losses(Player::kBlack);
-        if (black_pushed > white_pushed) return Result::kBlackWins;
-        if (white_pushed > black_pushed) return Result::kWhiteWins;
-        return Result::kDraw;
-    }
+    // Move cap reached with neither side eliminated: settle on marble count.
+    if (config_.move_limit && ply_ >= *config_.move_limit) return result_by_count(board_);
     return Result::kOngoing;
 }
 
@@ -108,7 +110,7 @@ void Game::begin_agent_turn(const std::shared_ptr<Agent>& agent) {
     p->started = Clock::now();
     if (config_.time_per_move) p->deadline = p->started + *config_.time_per_move;
 
-    const Position pos{*p->snapshot, to_move_, ply_, *p->legal};
+    const Position pos{*p->snapshot, to_move_, ply_, config_.move_limit, *p->legal};
 
     // `done` is signalled by the worker; we wait on it rather than joining so
     // that a runaway agent cannot hold the game hostage.

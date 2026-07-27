@@ -23,6 +23,15 @@ enum class Result {
 
 const char* result_name(Result r);
 
+// Settles a position purely on marbles pushed off -- the rule that decides a
+// game which has reached its ply cap: whoever has pushed off more of the
+// opponent's marbles wins, equal counts draw. This free function is the single
+// home of that policy, so both the engine (Game::result) and an agent's own
+// terminal check at the cap agree on the outcome without re-implementing it.
+// It never inspects the ply; the caller decides *when* the cap is reached and
+// asks this *who* won. Returns only kBlackWins / kWhiteWins / kDraw.
+Result result_by_count(const Board& board);
+
 struct GameConfig {
     Opening opening = Opening::kClassic;
 

@@ -42,10 +42,25 @@ doubt, `grep` the file for the old class name and the old `name()` string before
 struct Position {
     const Board& board;                 // current position
     Player to_move;                     // your colour
-    int move_number;                    // plies played so far
+    int move_number;                    // plies played so far (the root ply)
+    std::optional<int> move_limit;      // ply cap, or nullopt if the game is uncapped
     const std::vector<Move>& legal;     // pre-generated, never empty
 };
 ```
+
+`move_number` is the ply at the **root** of your search — the position you were handed.
+As you descend your own tree, the ply of a node is `move_number` plus the depth you have
+descended; carry it down as a parameter alongside your depth counter rather than storing it
+on the board (the board is the value you copy at every node, and a hand-maintained ply on it
+drifts out of sync the moment one apply/undo path forgets to update it).
+
+`move_limit` is the ply cap, or `std::nullopt` when the game is uncapped (the default).
+When it is set, the game ends at that ply and the winner is whoever has pushed off more
+marbles — a *draw only if the counts are equal*. So `*move_limit - node_ply` is the plies
+you have left to force an ejection, and an evaluator can lean on it: weight the marble
+differential more heavily as that number shrinks, so a leader freezes its advantage and a
+trailer gambles for the swing while there is still time. Guard the whole term behind
+`if (pos.move_limit)` so uncapped games behave exactly as before.
 
 The legal moves are generated for you, so a working agent can be one line. To search, you
 apply moves to your own copy of the board:
@@ -71,6 +86,39 @@ search loop unless it is marked otherwise.
 | `marbles_left(board, p)` | Marbles `p` still has on the board | O(1) |
 | `is_eliminated(board, p)` | True once `p` has lost 6 marbles | O(1) |
 | `game_over(board)` | True when either side has been eliminated | O(1) |
+
+`game_over` only reports *elimination* — it takes a `Board`, which knows nothing about the
+ply, so it cannot and does not detect the move cap. When you play with a `move_limit`, your
+search decides the cap is reached (`node_ply >= *pos.move_limit`) and settles the position
+itself.
+
+### Settling a capped game
+
+When the ply cap is reached with nobody eliminated, the game is decided on marbles pushed
+off — and *that rule lives in the engine*, not in your agent, so every player agrees on it:
+
+| Call | Returns | Cost |
+| --- | --- | --- |
+| `result_by_count(board)` | `kBlackWins` / `kWhiteWins` / `kDraw`, by marbles pushed off | O(1) |
+
+It's declared in `abalone/game.hpp` (include that in addition to `agent.hpp`, since it
+returns the engine's `Result`). Your job is only to map that verdict onto your own score
+scale, from the side-to-move's perspective — which is also where a *draw value* other than
+zero (contempt: play on rather than accept the half-point) belongs, because that is your
+playing style, not a rule of the game:
+
+```cpp
+// At a node where node_ply >= *pos.move_limit -- the cap terminal, not depth == 0.
+float settled(const abalone::Board& board, abalone::Player p) const {
+    switch (abalone::result_by_count(board)) {
+        case abalone::Result::kDraw: return kDrawValue;   // 0, or a small contempt bias
+        default: /* winner known */ break;
+    }
+    const bool i_won = (abalone::result_by_count(board) == abalone::Result::kBlackWins)
+                       == (p == abalone::Player::kBlack);
+    return i_won ? WIN : -WIN;
+}
+```
 
 ### Shape queries
 
