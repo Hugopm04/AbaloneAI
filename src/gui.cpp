@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -12,6 +15,7 @@
 
 #include "abalone/agent.hpp"
 #include "abalone/move.hpp"
+#include "abalone/serialize.hpp"
 
 namespace abalone {
 namespace {
@@ -118,7 +122,7 @@ void centered(const char* text, int fs, float cx, float y, Color col) {
 
 // --- app state --------------------------------------------------------------
 
-enum class Screen { kMenu, kSetup, kSettings, kPlay };
+enum class Screen { kMenu, kSetup, kSettings, kPlay, kExport };
 
 // A destination the human can click, derived from the legal move list.
 struct Target {
@@ -180,6 +184,14 @@ struct App {
     // Stats for the last AI turn played, shown in the side panel.
     std::optional<MoveReport> last_ai;
     std::string last_ai_who;
+
+    // Export screen: which per-move stats the "game + stats" blob carries, and
+    // the result line shown after a save (the path written, or an error).
+    unsigned export_stats = kStatTime | kStatNodes | kStatScore;
+    std::string export_msg;
+
+    // Menu: result of the last clipboard import attempt.
+    std::string import_msg;
 
     bool human_turn() const {
         if (!game) return false;
@@ -249,6 +261,32 @@ void start_game(App& app) {
     app.banner.clear();
     app.last_ai.reset();
     app.fly_offs.clear();
+    app.screen = Screen::kPlay;
+    begin_turn(app);
+}
+
+// Loads a game blob from the clipboard, replays it into a fresh game, and jumps
+// to the board. Both sides are set to human so an imported game opens paused for
+// viewing or continuing rather than immediately handing the position to an AI.
+void import_game_from_clipboard(App& app) {
+    const char* text = GetClipboardText();
+    DecodedGame dg;
+    if (!text || !decode_game(std::string(text), &dg)) {
+        app.import_msg = "Clipboard does not contain a valid game blob.";
+        return;
+    }
+
+    app.config.opening = dg.opening;
+    app.human_black = app.human_white = true;
+    app.game = std::make_unique<Game>(app.config);
+    app.black_ai.reset();
+    app.white_ai.reset();
+    for (const MoveReport& r : dg.moves) app.game->play(r.move, r);
+
+    app.banner.clear();
+    app.last_ai.reset();
+    app.fly_offs.clear();
+    app.import_msg.clear();
     app.screen = Screen::kPlay;
     begin_turn(app);
 }
@@ -477,7 +515,7 @@ void draw_side_panel(App& app, Rectangle r) {
 
     const bool has_ai = !app.human_black || !app.human_white;
 
-    y = r.y + r.height - (has_ai ? 216.0f : 132.0f);
+    y = r.y + r.height - (has_ai ? 258.0f : 174.0f);
     if (has_ai) {
         if (button(Rectangle{r.x + 16, y, r.width - 32, 34},
                    app.step_mode ? "Step mode: on" : "Step mode: off")) {
@@ -507,6 +545,11 @@ void draw_side_panel(App& app, Rectangle r) {
     }
     y += 42;
     if (button(Rectangle{r.x + 16, y, r.width - 32, 34}, "Restart")) start_game(app);
+    y += 42;
+    if (button(Rectangle{r.x + 16, y, r.width - 32, 34}, "Export...")) {
+        app.export_msg.clear();
+        app.screen = Screen::kExport;
+    }
     y += 42;
     if (button(Rectangle{r.x + 16, y, r.width - 32, 34}, "Main menu")) app.screen = Screen::kMenu;
 }
@@ -594,28 +637,36 @@ void screen_menu(App& app) {
     centered("ABALONE", 64, cx, 90, kInk);
     centered("click marbles, then click where they should go", 20, cx, 166, kInkDim);
 
+    if (!app.import_msg.empty()) {
+        centered(app.import_msg.c_str(), 18, cx, 196, kPushOff);
+    }
+
     const float w = 340, x = cx - w * 0.5f;
-    float y = 240;
+    float y = 232;
     const bool have_agents = !agents().empty();
 
-    if (button(Rectangle{x, y, w, 52}, "Human vs Human")) {
+    if (button(Rectangle{x, y, w, 50}, "Human vs Human")) {
         app.human_black = app.human_white = true;
         start_game(app);
     }
-    y += 66;
-    if (button(Rectangle{x, y, w, 52}, "Human vs AI", have_agents)) {
+    y += 60;
+    if (button(Rectangle{x, y, w, 50}, "Human vs AI", have_agents)) {
         app.human_black = true;
         app.human_white = false;
         app.screen = Screen::kSetup;
     }
-    y += 66;
-    if (button(Rectangle{x, y, w, 52}, "AI vs AI", have_agents)) {
+    y += 60;
+    if (button(Rectangle{x, y, w, 50}, "AI vs AI", have_agents)) {
         app.human_black = app.human_white = false;
         app.screen = Screen::kSetup;
     }
-    y += 66;
-    if (button(Rectangle{x, y, w, 52}, "Settings")) app.screen = Screen::kSettings;
-    y += 66;
+    y += 60;
+    if (button(Rectangle{x, y, w, 50}, "Import game (clipboard)")) {
+        import_game_from_clipboard(app);
+    }
+    y += 60;
+    if (button(Rectangle{x, y, w, 50}, "Settings")) app.screen = Screen::kSettings;
+    y += 60;
     // Never call CloseWindow() here: the rest of this frame, and the top of the
     // next loop iteration, would still be talking to a destroyed window.
     if (button(Rectangle{x, y, w, 52}, "Quit")) app.quit = true;
@@ -760,6 +811,105 @@ void screen_settings(App& app) {
     if (button(Rectangle{x, y, w, 50}, "Back")) app.screen = Screen::kMenu;
 }
 
+// A stat chip that reads as on/off. Returns true on the frame it is clicked.
+bool toggle_chip(Rectangle r, const char* label, bool on) {
+    const bool hot = CheckCollisionPointRec(GetMousePosition(), r);
+    Color fill = on ? Color{40, 70, 60, 255} : Color{30, 32, 38, 255};
+    if (hot) fill = on ? Color{50, 92, 76, 255} : Color{52, 57, 70, 255};
+    DrawRectangleRounded(r, 0.30f, 6, fill);
+    DrawRectangleRoundedLines(r, 0.30f, 6, on ? kDest : Color{60, 64, 76, 255});
+
+    const int fs = 18;
+    const int tw = MeasureText(label, fs);
+    DrawText(label, static_cast<int>(r.x + (r.width - tw) * 0.5f),
+             static_cast<int>(r.y + (r.height - fs) * 0.5f), fs, on ? kInk : kInkDim);
+    return hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+// Writes `blob` to a timestamped file under exports/ and reports the result
+// (the path, or an error) in app.export_msg. raylib has no save dialog, so the
+// filename is generated rather than prompted for.
+void save_blob(App& app, const char* label, const std::string& blob) {
+    std::error_code ec;
+    std::filesystem::create_directories("exports", ec);
+
+    const std::time_t now = std::time(nullptr);
+    char stamp[32] = "unknown";
+    if (const std::tm* lt = std::localtime(&now)) {
+        std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", lt);
+    }
+
+    const std::string path = std::string("exports/") + label + "_" + stamp + ".aba";
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        app.export_msg = std::string("Could not write ") + path;
+        return;
+    }
+    out << blob;
+
+    // Also drop the blob on the clipboard, so a game can be re-imported (from
+    // the menu) with no file picker in between.
+    SetClipboardText(blob.c_str());
+    app.export_msg = std::string("Saved ") + path + "  (and copied to clipboard)";
+}
+
+void screen_export(App& app) {
+    const float cx = GetScreenWidth() * 0.5f;
+    centered("Export", 40, cx, 70, kInk);
+
+    const float w = 520, x = cx - w * 0.5f;
+    float y = 150;
+
+    if (!app.game) {  // only reachable from a live game, but guard anyway
+        centered("No game to export.", 20, cx, y, kPushOff);
+        if (button(Rectangle{x, y + 40, w, 44}, "Back")) app.screen = Screen::kMenu;
+        return;
+    }
+    const Game& g = *app.game;
+
+    DrawText("Position", static_cast<int>(x), static_cast<int>(y), 20, kInkDim);
+    y += 30;
+    if (button(Rectangle{x, y, w, 44}, "Export board position")) {
+        save_blob(app, "board",
+                  encode_board(g.board(), g.to_move(), g.ply(), g.config().opening));
+    }
+    y += 58;
+
+    DrawText("Game", static_cast<int>(x), static_cast<int>(y), 20, kInkDim);
+    y += 30;
+    if (button(Rectangle{x, y, w, 44}, "Export game (moves only)")) {
+        save_blob(app, "game", encode_game(g));
+    }
+    y += 64;
+
+    DrawText("Game + AI stats  --  choose which to include", static_cast<int>(x),
+             static_cast<int>(y), 20, kInkDim);
+    y += 32;
+    const struct { const char* label; unsigned bit; } chips[] = {
+        {"time", kStatTime},   {"nodes", kStatNodes}, {"evals", kStatEvals},
+        {"score", kStatScore}, {"flags", kStatFlags},
+    };
+    float chip_x = x;
+    for (const auto& c : chips) {
+        const float cw = 98;
+        if (toggle_chip(Rectangle{chip_x, y, cw, 38}, c.label, (app.export_stats & c.bit) != 0)) {
+            app.export_stats ^= c.bit;
+        }
+        chip_x += cw + 8;
+    }
+    y += 54;
+    if (button(Rectangle{x, y, w, 44}, "Export game + stats")) {
+        save_blob(app, "game_stats", encode_game_with_stats(g, app.export_stats));
+    }
+    y += 64;
+
+    if (!app.export_msg.empty()) {
+        centered(app.export_msg.c_str(), 18, cx, y, kDest);
+    }
+    y += 44;
+    if (button(Rectangle{x, y, w, 46}, "Back to game")) app.screen = Screen::kPlay;
+}
+
 void screen_play(App& app) {
     const float panel_w = 300.0f;
     const Rectangle board_area{16, 16, GetScreenWidth() - panel_w - 48.0f,
@@ -797,9 +947,15 @@ int run_gui(GameConfig config) {
     while (!WindowShouldClose() && !app.quit) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (app.screen == Screen::kMenu) break;
-            app.editing_time = false;  // abandon a half-typed time cap
-            app.editing_move = false;  // abandon a half-typed move cap
-            app.screen = Screen::kMenu;
+            // From the export screen, Esc drops back to the game it came from
+            // rather than all the way to the menu.
+            if (app.screen == Screen::kExport) {
+                app.screen = Screen::kPlay;
+            } else {
+                app.editing_time = false;  // abandon a half-typed time cap
+                app.editing_move = false;  // abandon a half-typed move cap
+                app.screen = Screen::kMenu;
+            }
         }
 
         BeginDrawing();
@@ -809,6 +965,7 @@ int run_gui(GameConfig config) {
             case Screen::kSetup:    screen_setup(app);    break;
             case Screen::kSettings: screen_settings(app); break;
             case Screen::kPlay:     screen_play(app);     break;
+            case Screen::kExport:   screen_export(app);   break;
         }
         EndDrawing();
     }

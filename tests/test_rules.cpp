@@ -5,6 +5,7 @@
 #include <string>
 
 #include "abalone/game.hpp"
+#include "abalone/serialize.hpp"
 
 using namespace abalone;
 
@@ -291,6 +292,73 @@ void test_agents_play() {
     check(game.over(), "an agent game terminates");
 }
 
+// --- serialization ----------------------------------------------------------
+
+void test_serialization() {
+    const AgentEntry* random = AgentRegistry::instance().find("random");
+    check(random != nullptr, "random agent present for serialization test");
+
+    GameConfig cfg;
+    cfg.opening = Opening::kBelgianDaisy;
+    cfg.move_limit = 40;
+    cfg.time_per_move = std::chrono::milliseconds(20);
+    std::shared_ptr<Agent> b = random->factory();
+    std::shared_ptr<Agent> w = random->factory();
+    b->on_game_start(Player::kBlack);
+    w->on_game_start(Player::kWhite);
+
+    Game game(cfg);
+    for (int i = 0; i < 20 && !game.over(); ++i) {
+        game.play_agent_turn(game.to_move() == Player::kBlack ? b : w);
+    }
+    check(game.ply() > 0, "serialization test produced some moves");
+
+    // Board blob round-trips position, side to move, ply and losses exactly.
+    {
+        const std::string blob =
+            encode_board(game.board(), game.to_move(), game.ply(), cfg.opening);
+        check(blob_kind(blob) == 0, "board blob is kind 0");
+        Board rb;
+        Player rt;
+        int rp;
+        Opening ro;
+        check(decode_board(blob, &rb, &rt, &rp, &ro), "board decodes");
+        check(rt == game.to_move() && rp == game.ply() && ro == cfg.opening,
+              "board metadata round-trips");
+        for (const Coord& c : Board::cells()) {
+            check(rb.at(c) == game.board().at(c), "every cell round-trips");
+        }
+        check(rb.losses(Player::kBlack) == game.board().losses(Player::kBlack) &&
+                  rb.losses(Player::kWhite) == game.board().losses(Player::kWhite),
+              "losses round-trip");
+    }
+
+    // Game + stats blob round-trips the opening, moves and selected stats.
+    {
+        const unsigned mask = kStatTime | kStatNodes | kStatEvals | kStatFlags;
+        const std::string blob = encode_game_with_stats(game, mask);
+        check(blob_kind(blob) == 2, "game+stats blob is kind 2");
+        DecodedGame dg;
+        check(decode_game(blob, &dg), "game decodes");
+        check(dg.opening == cfg.opening, "opening round-trips");
+        check(dg.moves.size() == game.history().size(), "move count round-trips");
+        for (std::size_t i = 0; i < dg.moves.size(); ++i) {
+            const Move& a = dg.moves[i].move;
+            const Move& e = game.history()[i].move;
+            check(a.head == e.head && a.count == e.count && a.dir == e.dir &&
+                      a.line_dir == e.line_dir && a.inline_move == e.inline_move,
+                  "each move round-trips");
+            check(dg.moves[i].nodes == game.history()[i].nodes, "nodes round-trip");
+            check(dg.moves[i].elapsed == game.history()[i].elapsed, "time round-trips");
+        }
+    }
+
+    // Garbage is rejected, never misread as a game.
+    check(blob_kind("not a blob!!") == -1, "garbage is not a valid blob");
+    DecodedGame junk;
+    check(!decode_game("@@@@", &junk), "garbage does not decode as a game");
+}
+
 }  // namespace
 
 int main() {
@@ -301,6 +369,7 @@ int main() {
     test_generation_invariants();
     test_game_flow();
     test_agents_play();
+    test_serialization();
 
     std::cout << "All tests passed (" << g_checks << " checks).\n";
     return 0;

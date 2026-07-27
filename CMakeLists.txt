@@ -62,6 +62,7 @@ set(ENGINE_SOURCES
   src/move.cpp
   src/agent.cpp
   src/game.cpp
+  src/serialize.cpp
   src/ui.cpp
   src/arena.cpp
 )
