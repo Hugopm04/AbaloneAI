@@ -12,6 +12,7 @@
 // It then shows up in the main menu and in the arena with no further wiring.
 
 #include "abalone/agent.hpp"
+#include "abalone/game.hpp"
 #include <limits>
 
 namespace {
@@ -47,14 +48,15 @@ public:
         // A searching agent would loop here, deepening and re-submitting, and
         // bail out when ctx.deadline_passed() turns true. Random has nothing
         // to think about, so it just returns.
-
+        MAX_PLIES = pos.move_limit.value_or(std::numeric_limits<int>::max());
+        int root_ply = pos.move_number;
         for (int i = 1; i <= MAX_DEPTH; i++){
             float best_score = NEG_INFINITE;
             auto best_move = pos.legal.front();
             for (const abalone::Move& m : pos.legal) {
                 abalone::Board next = pos.board;
                 abalone::apply_move(&next, pos.to_move, m);
-                const float score = -search(next, abalone::other(pos.to_move), i - 1, NEG_INFINITE, POS_INFINITE, ctx);
+                const float score = -search(next, abalone::other(pos.to_move), i - 1, root_ply + i, NEG_INFINITE, POS_INFINITE, ctx);
                 if (not ctx.deadline_passed()){
                     if (score > best_score) {
                         best_score = score;
@@ -71,13 +73,26 @@ public:
 
 private:
     const int MAX_DEPTH = 4;
+    int MAX_PLIES;
 
-    float search(const abalone::Board& board, abalone::Player p, int depth, 
+    float search(const abalone::Board& board, abalone::Player p, int depth, const int current_ply,
         float alpha, float beta, abalone::SearchContext& ctx) {
 
         if (depth == 0 || abalone::game_over(board)) {
             ctx.count_eval();               // leaf: the heuristic actually ran
-            return evaluate(board, p);
+            return evaluate(board, p, current_ply);
+        }
+
+        if (current_ply >= MAX_PLIES){
+            if (abalone::result_by_count(board) == abalone::Result::kDraw) {
+                 return 0;   // 0, or a small contempt bias
+            }
+
+            const bool i_won = (abalone::result_by_count(board) == abalone::Result::kBlackWins)
+                            == (p == abalone::Player::kBlack);
+
+            if (i_won) return POS_INFINITE;
+            else return NEG_INFINITE;
         }
 
         auto moves = abalone::generate_moves(board, p);
@@ -93,7 +108,7 @@ private:
         return best;
     }
 
-    float evaluate(const abalone::Board& board, const abalone::Player& p) const {
+    float evaluate(const abalone::Board& board, const abalone::Player& p, const int current_ply) const {
         int own_losses = board.losses(p);
         if (own_losses == 6){
             return NEG_INFINITE;
@@ -103,31 +118,35 @@ private:
         if (enemy_losses == 6){
             return POS_INFINITE;
         }
-        
+
         float puntuation = 0;
         
          int own_marbles = board.marbles(p);
         int enemy_marbles = board.marbles(abalone::other(p));
 
         float marble_count_puntuation = own_marbles - enemy_marbles; // [-5, 5] -> 10
-        marble_count_puntuation = (marble_count_puntuation + 5) / 10.0;
+        marble_count_puntuation = marble_count_puntuation / 5.0;
 
         // Nº of Arrows
         int own_arrows = abalone::arrows(board, p);
         int enemy_arrows = abalone::arrows(board, abalone::other(p));
 
         float arrows_puntuation = own_arrows - enemy_arrows;
-        arrows_puntuation = (arrows_puntuation + 16) / 32.0; // [-16, 16] -> 32
+        arrows_puntuation = arrows_puntuation/ 16.0; // [-16, 16] -> 32
 
         // Nº of Edge Marbles
         int own_edge = abalone::edge_marbles(board, p);
         int enemy_edge = abalone::edge_marbles(board, abalone::other(p));
         
         float edge_puntuation = enemy_edge - own_edge;
-        edge_puntuation = (edge_puntuation + 14) / 28.0;  // [-14, 14] -> 28
+        edge_puntuation = edge_puntuation / 14.0;  // [-14, 14] -> 28
+
+        int remaining_plies = MAX_PLIES - current_ply;
+        float urgency_factor = 1.0;
+        float urgency = 1 + urgency_factor * (1 - static_cast<float>(remaining_plies) / MAX_PLIES); 
 
         puntuation +=
-        5 * marble_count_puntuation + 
+        5 * marble_count_puntuation * urgency + 
         1.5 * arrows_puntuation +
         3.5 * edge_puntuation;
         

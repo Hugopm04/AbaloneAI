@@ -8,9 +8,24 @@ Abalone (the hex-board marble-pushing game), **not** Avalon. C++17, no external 
 include/abalone/   public headers (board, move, agent, game, ui, gui, arena)
 src/               engine implementation + main.cpp + gui.cpp (raylib, optional)
 agents/            user-written AIs; every .cpp here is globbed into the build
+                   (move_ordering.hpp is shared header-only search infrastructure,
+                    not an agent -- headers are not globbed)
 tests/             assert-based rule tests, no framework
 docs/              writing_agents.md, toolchain_setup.md
 ```
+
+## Do not edit the agents
+
+The `.cpp` files in `agents/` are the user's own work and are actively being edited between
+prompts. **Never modify them unless the user explicitly asks for that file to be changed.**
+This holds even when a bug is certain and the fix is one line — including crashes.
+
+Diagnose instead: name the file and line, explain the fault, and show the corrected snippet
+in the reply for the user to apply. Fixing it for them silently overwrites work in progress
+and takes away the part they are here to do.
+
+Shared infrastructure in `agents/` that the user asked for (`move_ordering.hpp`) is not
+covered by this — but the agents that call it still are.
 
 ## Design decisions already made
 

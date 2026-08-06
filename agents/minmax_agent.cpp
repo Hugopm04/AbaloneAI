@@ -13,6 +13,7 @@
 
 #include "abalone/agent.hpp"
 #include "abalone/game.hpp"
+#include "move_ordering.hpp"
 #include <limits>
 
 namespace {
@@ -38,35 +39,24 @@ public:
         // the turn as forfeited -- so always publish a legal move up front.
         ctx.submit(pos.legal.front(), 0);
 
-        // Statistics. A real search separates these two: count_node() for every
-        // position you touch, count_eval() only where you run your heuristic.
-        // Pruning shows up as nodes rising while evals stays flat.
-        ctx.count_node(pos.legal.size());
-        ctx.count_eval(1);
-
-        // A searching agent would loop here, deepening and re-submitting, and
-        // bail out when ctx.deadline_passed() turns true. Random has nothing
-        // to think about, so it just returns.
+        roots_.reset(pos.legal);
         MAX_PLIES = pos.move_limit.value_or(std::numeric_limits<int>::max());
         int root_ply = pos.move_number;
-        for (int i = 1; i <= MAX_DEPTH; i++){
-            float best_score = NEG_INFINITE;
-            auto best_move = pos.legal.front();
-            for (const abalone::Move& m : pos.legal) {
-                abalone::Board next = pos.board;
-                abalone::apply_move(&next, pos.to_move, m);
-                const float score = -search(next, abalone::other(pos.to_move), i - 1, root_ply + 1, ctx);
-                if (not ctx.deadline_passed()){
-                    if (score > best_score) {
-                        best_score = score;
-                        best_move = m;
 
-                        // Submit as we improve, with the score attached so the UI can
-                        // show what this move was worth to us.
-                        ctx.submit(best_move, best_score);
-                    }
-                }
+        for (int depth = 1; depth <= MAX_DEPTH; depth++){
+            roots_.clear_scores();
+
+            for (std::size_t idx = 0; idx < roots_.size(); idx++) {
+                abalone::Board next = pos.board;
+                abalone::apply_move(&next, pos.to_move, roots_.move(idx));
+                const float score = -search(next, abalone::other(pos.to_move), depth - 1, root_ply + 1, ctx);
+                if (ctx.deadline_passed()) break;
+                roots_.set_score(idx, score);
             }
+
+            if (ctx.deadline_passed()) break;   // pass incomplete -- do not reorder on it
+            roots_.order_best_first();
+            ctx.submit(roots_.best(), roots_.best_score());
         }
 
     }
@@ -74,9 +64,12 @@ public:
 private:
     const int MAX_DEPTH = 4;
     int MAX_PLIES;
+    agents::RootMoves roots_;
 
     float search(const abalone::Board& board, abalone::Player p, int depth, const int current_ply, abalone::SearchContext& ctx) {
-        if (depth == 0 || abalone::game_over(board)) {
+        // `depth <= 0`, not `== 0`: an off-by-one that lets depth go negative
+        // turns this into unbounded recursion and a stack overflow.
+        if (depth <= 0 || abalone::game_over(board)) {
             ctx.count_eval();               // leaf: the heuristic actually ran
             return evaluate(board, p, current_ply);
         }
@@ -123,25 +116,25 @@ private:
         int enemy_marbles = board.marbles(abalone::other(p));
 
         float marble_count_puntuation = own_marbles - enemy_marbles; // [-5, 5] -> 10
-        marble_count_puntuation = (marble_count_puntuation + 5) / 10.0;
+        marble_count_puntuation = marble_count_puntuation / 5.0;
 
         // Nº of Arrows
         int own_arrows = abalone::arrows(board, p);
         int enemy_arrows = abalone::arrows(board, abalone::other(p));
 
         float arrows_puntuation = own_arrows - enemy_arrows;
-        arrows_puntuation = (arrows_puntuation + 16) / 32.0; // [-16, 16] -> 32
+        arrows_puntuation = arrows_puntuation/ 16.0; // [-16, 16] -> 32
 
         // Nº of Edge Marbles
         int own_edge = abalone::edge_marbles(board, p);
         int enemy_edge = abalone::edge_marbles(board, abalone::other(p));
         
         float edge_puntuation = enemy_edge - own_edge;
-        edge_puntuation = (edge_puntuation + 14) / 28.0;  // [-14, 14] -> 28
+        edge_puntuation = edge_puntuation / 14.0;  // [-14, 14] -> 28
 
         int remaining_plies = MAX_PLIES - current_ply;
         float urgency_factor = 1.0;
-        float urgency = 1 + urgency_factor * (1 - remaining_plies / MAX_PLIES); 
+        float urgency = 1 + urgency_factor * (1 - static_cast<float>(remaining_plies) / MAX_PLIES); 
 
         puntuation +=
         5 * marble_count_puntuation * urgency + 

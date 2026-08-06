@@ -308,6 +308,89 @@ loop, means a node whose children are all pruned still reports the moves it gene
 cost you actually paid. Either convention is defensible; just pick one and keep it, since
 the ratio is only meaningful compared against your own earlier runs.
 
+## Move ordering
+
+`agents/move_ordering.hpp` is header-only shared infrastructure for the bots in `agents/`.
+Include it directly — the CMake glob only picks up `.cpp` files, so there is nothing to wire
+up:
+
+```cpp
+#include "move_ordering.hpp"
+```
+
+It holds two tools for two jobs that look alike but are not: `RootMoves`, which remembers
+the **real search scores** of the root moves between deepening passes, and `order_moves()`,
+a **cheap static guess** for interior nodes.
+
+### `RootMoves` — the root, across iterations
+
+Iterative deepening restarts its scores at every depth. When the clock kills a deep pass
+halfway through, the best move that pass found is the best of whatever *prefix* of the move
+list it reached — and that prefix need not contain the move the previous depth chose. The
+result is a deep, partial pass quietly replacing a shallow, complete one with something
+worse.
+
+Ordering the root best-first fixes it structurally: the incumbent sits at index 0, so an
+interrupted pass is always at least as good as the pass before it.
+
+```cpp
+void choose_move(const Position& pos, SearchContext& ctx) override {
+    ctx.submit(pos.legal.front());
+
+    roots_.reset(pos.legal);            // generation order, all scores unscored
+
+    for (int depth = 1; depth <= kMaxDepth; ++depth) {
+        roots_.clear_scores();          // keep last pass's ORDER, drop its scores
+
+        for (std::size_t i = 0; i < roots_.size(); ++i) {
+            abalone::Board next = pos.board;
+            abalone::apply_move(&next, pos.to_move, roots_.move(i));
+            const float s = -search(next, abalone::other(pos.to_move), depth - 1, ctx);
+            if (ctx.deadline_passed()) break;
+            roots_.set_score(i, s);
+        }
+
+        if (ctx.deadline_passed()) break;   // pass incomplete -- do not reorder on it
+        roots_.order_best_first();
+        ctx.submit(roots_.best(), roots_.best_score());
+    }
+}
+```
+
+Three details that matter:
+
+- **`clear_scores()` keeps the order but drops the numbers.** The order is what you want to
+  search first; the scores came from a shallower search and must never be compared against
+  the current pass's.
+- **Only reorder after a pass that completed.** Sorting a partial pass promotes moves that
+  were never scored, on stale data.
+- **`reset()` preserves generation order**, so the first iteration searches exactly what a
+  plain deepening loop would. Ordering only starts paying from depth 2 on.
+
+The cost is one sort of ~100 elements per iteration, against millions of nodes — free.
+
+### `order_moves()` — interior nodes
+
+Interior nodes are the hot path, so ordering there uses `static_move_score()`, computed from
+the `Move` alone: pushing a marble off is decisive (`+1000`), pushing is progress (`+100`
+each), and a longer line is harder to answer (`+count`). No search, no board scan.
+
+```cpp
+auto moves = abalone::generate_moves(board, p);
+if (depth >= 2) agents::order_moves(moves);
+```
+
+Mind the guard. Near the leaves the sort costs more than the cutoffs it buys, so ordering at
+`depth == 1` is pure overhead. This is also where the payoff lives: without ordering,
+alpha-beta prunes almost nothing, because a cutoff only happens once you have already
+searched a good move.
+
+### What it deliberately does not hold
+
+No `Board`, no `Player`. A container that cached the root position would read the *root* at
+every leaf — the same trap that got `own_marbles()` removed from `Position`. It stores moves
+and scores, nothing else.
+
 ## Breadth-first search
 
 Worth saying plainly first: **for game playing, iterative deepening is the breadth-first
